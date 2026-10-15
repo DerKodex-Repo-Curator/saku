@@ -112,6 +112,8 @@ class LlmConfig:
     model: str = ""
     context_window: int = 0  # 0 = unknown (the server's -c value)
     working_budget_tokens: int = 0  # 0 = unknown (the agent's working budget)
+    reasoning_effort: str = ""  # "" = omit; e.g. "none" for reasoning models (Strata)
+    stop_tokens: list[str] | None = None  # None = use llm.STOP_TOKENS (engines may cap the count)
 
     @property
     def is_configured(self) -> bool:
@@ -137,6 +139,8 @@ def load_profile(cfg: dict, name: str) -> "LlmConfig | None":
         model=prof.get("model", ""),
         context_window=prof.get("context_window", 0),
         working_budget_tokens=prof.get("working_budget_tokens", 0),
+        reasoning_effort=prof.get("reasoning_effort", ""),
+        stop_tokens=prof.get("stop_tokens"),
     )
 
 
@@ -172,7 +176,8 @@ def load_llm_instance(cfg: dict, name: str = "main") -> LlmConfig:
     else:
         llm = load_active_llm(cfg)
 
-    for key in ("api_url", "api_key", "model", "context_window", "working_budget_tokens"):
+    for key in ("api_url", "api_key", "model", "context_window", "working_budget_tokens",
+                "reasoning_effort", "stop_tokens"):
         if inst.get(key):
             setattr(llm, key, inst[key])
     llm.name = name
