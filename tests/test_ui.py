@@ -107,6 +107,11 @@ def test_chat_sse_status_and_page():
         import saku.agent_loop as al
 
         original = al.chat_stream
+        saved = []
+        original_save = ui.agent.save_journal
+        # The handler journals the exchange; without this the test writes into the
+        # Owner's real journal via the configured memory root.
+        ui.agent.save_journal = lambda msg, reply, thinking="": saved.append((msg, reply))
         al.chat_stream = lambda history, llm_cfg, on_token=None: "こんにちは"
         try:
             req = urllib.request.Request(
@@ -118,8 +123,10 @@ def test_chat_sse_status_and_page():
                 body = r.read().decode("utf-8")
         finally:
             al.chat_stream = original
+            ui.agent.save_journal = original_save
         assert '"type": "status"' in body
         assert '"thinking"' in body
+        assert saved == [("hi", "こんにちは")]
 
         page = _get(server, "/").decode("utf-8")
         assert 'data.type === "status"' in page
