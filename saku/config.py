@@ -271,3 +271,26 @@ def load_channels_config(cfg: dict) -> ChannelsConfig:
         enabled=[x for x in c.get("enabled", ["webui", "chatmd"])],
         proactive=[x for x in c.get("proactive", ["webui"])],
     )
+
+
+# ── Dreaming / Growth Config ────────────────────────────
+# Growth is not only accumulation: promoted memory is scored, reinforced when it
+# is mentioned again, and reviewed so stale low-value entries decay to an archive
+# section instead of staying in the foreground forever. Thresholds are configurable
+# (design principle 8: no hardcoding).
+@dataclass
+class DreamingConfig:
+    review_enabled: bool = True  # run the decay/review pass after promotion
+    ttl_days: int = 90  # entries not re-mentioned for this long are candidates for decay
+    min_score: int = 2  # entries at or below this score may be archived once stale
+    archive_section: str = "Archive"  # MEMORY.md section decayed entries move to
+
+
+def load_dreaming_config(cfg: dict) -> DreamingConfig:
+    d = cfg.get("dreaming", {})
+    return DreamingConfig(
+        review_enabled=d.get("review_enabled", True),
+        ttl_days=d.get("ttl_days", 90),
+        min_score=d.get("min_score", 2),
+        archive_section=d.get("archive_section", "Archive"),
+    )

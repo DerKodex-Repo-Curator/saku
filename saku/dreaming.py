@@ -7,6 +7,11 @@ under the appropriate section (append-only, no duplication).
 This is the "memory promotion" layer: raw experience (journal/monologue) -> durable
 memory (MEMORY.md). Unlike the nightly reflection (which updates principles/ and
 meta.md), dreaming distills facts and patterns that should persist long-term.
+
+Growth is not only accumulation. Promoted entries carry an importance score and a
+last-seen date (as an HTML comment, so Obsidian rendering stays clean). Re-mentioning
+an item reinforces it (score up, last-seen refreshed), and a review pass decays stale
+low-score entries into an archive section -- moved, never deleted.
 """
 
 import re
@@ -51,6 +56,138 @@ _MEMORY_ITEM_RE = re.compile(
     r"\[MEMORY\]\s*category:\s*(.+?)\s*content:\s*(.+?)\s*\[/MEMORY\]",
     re.DOTALL,
 )
+
+# An entry line: "- 2026-08-03: some text <!-- s:3 last:2026-08-30 -->"
+# The metadata comment is optional so that pre-existing (legacy) entries still parse.
+_ENTRY_RE = re.compile(
+    r"^\s*- (?P<date>\d{4}-\d{2}-\d{2}): (?P<text>.*?)"
+    r"(?:\s*<!--\s*s:(?P<score>\d+)\s+last:(?P<last>\d{4}-\d{2}-\d{2})\s*-->)?\s*$"
+)
+
+# Category weight for the heuristic importance score (no extra LLM call).
+# Decisions and durable facts outlive preferences and work-in-progress items.
+CATEGORY_WEIGHTS = {
+    "永続的な事実": 3,
+    "方針・決定": 3,
+    "重要な学び": 2,
+    "好み・傾向": 2,
+    "進行中プロジェクト": 1,
+}
+DEFAULT_SCORE = 1
+
+
+def score_for(category: str, reinforcements: int = 0) -> int:
+    """Heuristic importance score for a promoted item.
+
+    Base weight comes from the category; each re-mention adds one.
+    """
+    return CATEGORY_WEIGHTS.get(category, DEFAULT_SCORE) + max(0, reinforcements)
+
+
+def format_entry(date: str, text: str, score: int, last: str | None = None) -> str:
+    """Render a MEMORY.md entry line with its score/last-seen metadata."""
+    return f"- {date}: {text} <!-- s:{score} last:{last or date} -->"
+
+
+def parse_entry(line: str) -> dict | None:
+    """Parse an entry line. Returns None if the line is not an entry.
+
+    ``score``/``last`` are None for legacy entries written before metadata existed.
+    """
+    m = _ENTRY_RE.match(line)
+    if not m:
+        return None
+    return {
+        "date": m.group("date"),
+        "text": m.group("text").strip(),
+        "score": int(m.group("score")) if m.group("score") else None,
+        "last": m.group("last"),
+    }
+
+
+def _days_since(last: str, today: str) -> int:
+    """Days between ``last`` and ``today`` (0 when either cannot be parsed)."""
+    try:
+        return (
+            datetime.strptime(today, "%Y-%m-%d").date()
+            - datetime.strptime(last, "%Y-%m-%d").date()
+        ).days
+    except ValueError:
+        return 0
+
+
+def _replace_lines(content: str, lines: list[str]) -> str:
+    """Join ``lines`` back into content, preserving a trailing newline."""
+    out = "\n".join(lines)
+    if content.endswith("\n") and not out.endswith("\n"):
+        out += "\n"
+    return out
+
+
+def _reinforce_entry(content: str, text: str, date: str, delta: int = 1) -> str:
+    """Bump score and refresh last-seen for an existing entry with metadata.
+
+    Entries without metadata (legacy) are left untouched and returned as-is.
+    """
+    lines = content.splitlines()
+    changed = False
+    for i, line in enumerate(lines):
+        parsed = parse_entry(line)
+        if not parsed or parsed["score"] is None:
+            continue
+        if parsed["text"] != text.strip():
+            continue
+        last = max(parsed["last"] or date, date)
+        lines[i] = format_entry(parsed["date"], parsed["text"], parsed["score"] + delta, last)
+        changed = True
+    return _replace_lines(content, lines) if changed else content
+
+
+def review(
+    memory_path: Path,
+    *,
+    today: str,
+    ttl_days: int,
+    min_score: int,
+    archive_section: str = "Archive",
+) -> list[str]:
+    """Decay review: move stale, low-score entries into the archive section.
+
+    Only entries carrying metadata are considered, so entries written before
+    scoring existed are never touched. Content is moved, never deleted.
+    Returns the list of moved entry texts.
+    """
+    if not memory_path.exists():
+        return []
+
+    content = memory_path.read_text(encoding="utf-8")
+    kept: list[str] = []
+    decayed: list[str] = []
+
+    for line in content.splitlines():
+        parsed = parse_entry(line)
+        stale = (
+            parsed is not None
+            and parsed["score"] is not None
+            and parsed["last"] is not None
+            and parsed["score"] <= min_score
+            and _days_since(parsed["last"], today) > ttl_days
+        )
+        (decayed if stale else kept).append(line)
+
+    if not decayed:
+        return []
+
+    new_content = _replace_lines(content, kept)
+    anchor = f"## {archive_section}"
+    if anchor in new_content:
+        for entry in decayed:
+            new_content = _insert_after_heading(new_content, archive_section, entry)
+    else:
+        new_content = new_content.rstrip() + f"\n\n{anchor}\n" + "\n".join(decayed) + "\n"
+
+    memory_path.write_text(new_content, encoding="utf-8")
+    return [parse_entry(line)["text"] for line in decayed]
 
 
 def extract_items(target_date: str, journal: str, monologue: str) -> list[tuple[str, str]]:
@@ -120,8 +257,17 @@ def _insert_after_heading(content: str, heading: str, entry: str) -> str:
     return content[:after] + f"{entry}\n" + content[after:]
 
 
-def append_items(memory_path: Path, items: list[tuple[str, str]], date: str) -> list[str]:
+def append_items(
+    memory_path: Path,
+    items: list[tuple[str, str]],
+    date: str,
+    *,
+    scores: list[int] | None = None,
+) -> list[str]:
     """Append items to MEMORY.md under their section. Returns newly added contents.
+
+    Each entry is written with score/last-seen metadata. Re-promoting a known item
+    reinforces it (score up, last-seen refreshed) instead of appending a duplicate.
 
     Recovers a missing, empty, or corrupted MEMORY.md by re-initializing the header.
     """
@@ -132,15 +278,23 @@ def append_items(memory_path: Path, items: list[tuple[str, str]], date: str) -> 
         content = MEMORY_HEADER + "\n" + content.lstrip()
 
     added = []
-    for category, text in items:
+    changed = False
+    for idx, (category, text) in enumerate(items):
         section = MEMORY_SECTIONS[category]
-        if text.strip() in content:
+        clean = text.strip()
+        if clean in content:
+            # Already known: reinforce (refresh last-seen / raise score) instead.
+            reinforced = _reinforce_entry(content, clean, date)
+            if reinforced != content:
+                content = reinforced
+                changed = True
             continue
-        entry = f"- {date}: {text.strip()}"
-        content = _insert_after_heading(content, section, entry)
-        added.append(text.strip())
+        score = scores[idx] if scores else score_for(category)
+        content = _insert_after_heading(content, section, format_entry(date, clean, score, date))
+        added.append(clean)
+        changed = True
 
-    if added:
+    if changed:
         memory_path.write_text(content, encoding="utf-8")
     return added
 
@@ -166,8 +320,32 @@ def run_dreaming(target_date: str | None = None) -> list[str]:
         return []
 
     memory_path = agent.SAKU_ROOT / "MEMORY.md"
-    added = append_items(memory_path, items, target_date)
+    added = append_items(
+        memory_path, items, target_date, scores=[score_for(cat) for cat, _ in items]
+    )
     print(f"[*] Dreaming: promoted {len(added)} item(s) to MEMORY.md.")
+
+    # Decay review: stale low-score entries move to the archive section (never deleted).
+    try:
+        from saku import config as cfg_mod
+
+        cfg, _ = cfg_mod.load_config()
+        dcfg = cfg_mod.load_dreaming_config(cfg)
+        if dcfg.review_enabled:
+            decayed = review(
+                memory_path,
+                today=target_date,
+                ttl_days=dcfg.ttl_days,
+                min_score=dcfg.min_score,
+                archive_section=dcfg.archive_section,
+            )
+            if decayed:
+                print(
+                    f"[*] Dreaming: decayed {len(decayed)} stale item(s) "
+                    f"to '{dcfg.archive_section}'."
+                )
+    except Exception as e:
+        print(f"[!] Dreaming review failed: {e}")
 
     # Auto-wiki: create a daily wiki note from the same items so growth is visible
     try:

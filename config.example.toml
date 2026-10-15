@@ -97,6 +97,15 @@ archive_after_inactive_seconds = 1800 # Archive chat after 30 min inactivity
 archive_after_turns = 10              # Archive chat after 10 turns
 auto_initiate_cooldown_seconds = 28800 # SAKU self-initiates every 8 hours
 
+# [dreaming] - 成長（夢見）の整理・減衰設定
+# 昇格した記憶には重要度スコアと最終言及日が付き、再言及されると更新されます。
+# review は「古い & 低スコア」の項目を削除せず Archive セクションへ移動します。
+# [dreaming]
+# review_enabled = true    # 昇格後に review（減衰）パスを実行する
+# ttl_days = 90            # この日数以上再言及が無い項目を減衰候補にする
+# min_score = 2            # スコアがこれ以下の項目だけ減衰対象にする
+# archive_section = "Archive"  # 減衰した項目の移動先セクション名
+
 # [context] - コンテキスト管理（Phase B で実装。定義のみ）
 # 作業予算の何割で自動コンパクションするか（0.7 = 70%）
 # compaction_trigger = 0.7
