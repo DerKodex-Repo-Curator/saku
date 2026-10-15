@@ -32,10 +32,14 @@ def chat_stream(
         "stream": True,
         "temperature": 0.7,
         "top_p": 0.9,
-        "stop": STOP_TOKENS,
+        "stop": list(llm_cfg.stop_tokens) if llm_cfg.stop_tokens else STOP_TOKENS,
     }
     if llm_cfg.model:
         payload["model"] = llm_cfg.model
+    if llm_cfg.reasoning_effort:
+        # Reasoning engines (e.g. Strata / Qwen3.8-Flash-Next) put the answer in
+        # reasoning_content unless reasoning is disabled; "none" gives plain content.
+        payload["reasoning_effort"] = llm_cfg.reasoning_effort
 
     headers = {}
     if llm_cfg.api_key:

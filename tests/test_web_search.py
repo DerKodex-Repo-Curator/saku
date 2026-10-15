@@ -54,6 +54,45 @@ def test_run_rejects_empty_query():
     assert web_search.run(Path("."), body="") == "[ERROR] Query is empty."
 
 
+_LITE_HTML = """
+<table>
+<tr><td>1.</td><td><a rel="nofollow" href="https://a.example/1" class='result-link'>Title <b>One</b></a></td></tr>
+<tr><td>&nbsp;</td><td class='result-snippet'>Snippet with <b>bold</b> text one.</td></tr>
+<tr><td>2.</td><td><a href="//b.example/2" class='result-link'>Title Two</a></td></tr>
+<tr><td>&nbsp;</td><td class='result-snippet'>Snippet two.</td></tr>
+<tr><td>3.</td><td><a href="https://c.example/3" class='result-link'>Title Three</a></td></tr>
+<tr><td>&nbsp;</td><td class='result-snippet'>Snippet three.</td></tr>
+</table>
+"""
+
+_HTML_HTML = """
+<div class="result__body"><h2 class="result__title">
+<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fd.example%2Fx">Title Four</a>
+</h2><div class="result__snippet">Snippet <b>four</b>.</div></div>
+"""
+
+
+def test_parser_handles_nested_markup_in_snippets():
+    """Regression: <b> tags in a snippet used to break result pairing."""
+    parser = web_search.DDGLiteParser()
+    parser.feed(_LITE_HTML)
+    results = parser.results()
+    assert len(results) == 3
+    assert results[0]["title"] == "Title One"
+    assert results[0]["snippet"] == "Snippet with bold text one."
+    assert results[1]["url"] == "https://b.example/2"
+    assert results[2]["snippet"] == "Snippet three."
+
+
+def test_parser_supports_html_endpoint_classes():
+    parser = web_search.DDGLiteParser()
+    parser.feed(_HTML_HTML)
+    results = parser.results()
+    assert len(results) == 1
+    assert results[0]["title"] == "Title Four"
+    assert web_search._extract_real_url(results[0]["url"]) == "https://d.example/x"
+
+
 def run_tests():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in tests:
