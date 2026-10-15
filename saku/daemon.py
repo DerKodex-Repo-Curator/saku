@@ -478,16 +478,27 @@ def check_and_run_midnight_reflection(now: datetime | None = None) -> None:
     yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
     try:
+        # Track whether the reflection actually touched the self-model, so the
+        # report below only claims what really happened (see issue #39).
+        meta_path = MEMORY_ROOT / "meta.md"
+        meta_before = meta_path.stat().st_mtime_ns if meta_path.exists() else None
+
         # Run reflect logic
         reflection.run_reflection(yesterday)
+
+        meta_after = meta_path.stat().st_mtime_ns if meta_path.exists() else None
+        meta_updated = meta_before != meta_after
 
         # Record run date
         state["last_reflection_date"] = today_str
         save_chat_state(state)
 
-        # Post a report message to chat.md autonomously
-        report_msg = f"昨日の活動の振り返りと、本日（{today_str}）の自己モデル（meta.md）の整理を完了しました。今日もよろしくお願いいたします。"
-        saku_self_initiate(f"深夜振り返り報告 ({report_msg})")
+        # Post a report message to chat.md autonomously (claim only what happened)
+        if meta_updated:
+            summary = f"昨日の活動の振り返りと、本日（{today_str}）の自己モデル（meta.md）の整理を完了しました。"
+        else:
+            summary = f"昨日の活動の振り返りを完了しました。（本日の自己モデル（meta.md）の更新はありませんでした）"
+        saku_self_initiate(f"深夜振り返り報告 ({summary}今日もよろしくお願いいたします。)")
 
     except Exception as e:
         print(f"[!] Midnight reflection failed: {e}")
