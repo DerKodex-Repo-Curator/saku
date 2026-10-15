@@ -106,6 +106,15 @@ auto_initiate_cooldown_seconds = 28800 # SAKU self-initiates every 8 hours
 # min_score = 2            # スコアがこれ以下の項目だけ減衰対象にする
 # archive_section = "Archive"  # 減衰した項目の移動先セクション名
 
+# [recall] - lightプロンプトへの記憶の自動想起（prefetch）
+# lightプロンプトは MEMORY/principles/wiki を含めず SEARCH_NOTES に期待しますが、
+# モデルが検索せず一般論で返すことがあるため、発話に関連する記憶を少数だけ自動注入します。
+# [recall]
+# enabled = true           # 自動想起を有効にする
+# items = 3                # 注入する記憶の最大件数
+# max_chars = 600          # 注入ブロックの最大文字数
+# sources = ["MEMORY.md", "principles/", "wiki/"]  # 想起元（メモリルート相対）
+
 # [context] - コンテキスト管理（Phase B で実装。定義のみ）
 # 作業予算の何割で自動コンパクションするか（0.7 = 70%）
 # compaction_trigger = 0.7

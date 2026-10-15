@@ -334,6 +334,9 @@ class Handler(BaseHTTPRequestHandler):
             if history is None:
                 history = [{"role": "system", "content": agent.build_light_system_prompt()}]
             history = list(history)
+            recall_msg = agent.build_recall_message(message)
+            if recall_msg:
+                history.append(recall_msg)
             history.append({"role": "user", "content": message})
             _sessions[client_id] = history
 

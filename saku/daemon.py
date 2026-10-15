@@ -286,12 +286,16 @@ def check_chat_and_reply() -> None:
     if len(context_history) > 20:
         context_history = context_history[-20:]
 
+    # Prefetch related memory so the light prompt still shows continuity (#32)
+    recall_msg = agent.build_recall_message(owner_msg)
+    recall_block = f"\n{recall_msg['content']}\n" if recall_msg else ""
+
     prompt = f"""[system] chat.md上でOwnerからメッセージが届きました。
 以下の指示と会話の文脈を踏まえて返信してください。
 返信は必ず日本語で、最終的な回答のみを出力してください。「**Owner**」や「Owner>」は一切出力しないでください。
 必要な記憶があれば [[SEARCH_NOTES]] や [[READ_FILE]] でオンデマンドに取得してください。
 重い調査や時間のかかる作業を頼まれたら、必要に応じて [[SPAWN_CHILD name=\"...\"]] / [[DELEGATE child=\"...\"]] でサブエージェントに委譲してください。
-
+{recall_block}
 Ownerのメッセージ:
 {owner_msg}
 """

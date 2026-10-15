@@ -166,6 +166,32 @@ def build_light_system_prompt() -> str:
     return f"{static}\n\n# Current Time\n現在: {now}"
 
 
+def build_recall_message(message: str) -> "dict | None":
+    """Prefetch related memory for ``message`` as a system message, or None.
+
+    The light prompt intentionally omits memory files, but the model tends not to
+    call SEARCH_NOTES on its own (#32). Injecting a few relevant lines keeps the
+    "you remember me" feel at a small token cost. Disabled/cfg-driven and fail-open:
+    on any error the turn proceeds unchanged.
+    """
+    try:
+        from saku import recall as recall_mod
+
+        rcfg = saku_config.load_recall_config(_cfg)
+        if not rcfg.enabled:
+            return None
+        block = recall_mod.recall(
+            MEMORY_ROOT,
+            message,
+            items=rcfg.items,
+            max_chars=rcfg.max_chars,
+            sources=rcfg.sources,
+        )
+        return {"role": "system", "content": block} if block else None
+    except Exception:
+        return None
+
+
 def build_inbox_system_prompt() -> str:
     """Minimal prompt for inbox triage: even smaller than light.
 
