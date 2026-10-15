@@ -283,6 +283,59 @@ def test_no_action_marker_is_stripped_before_journalling():
     assert marker_only == "", "a marker-only reply must not leave text behind"
 
 
+def _run_reflection_report(tmp: Path, touch_meta: bool) -> str:
+    """Run the midnight reflection against a temp memory root and return the report text."""
+    calls = []
+
+    class _Refl:
+        @staticmethod
+        def run_reflection(d):
+            if touch_meta:
+                import os
+
+                p = tmp / "meta.md"
+                p.write_text("## 最近の出来事\n\n- 更新\n", encoding="utf-8")
+                # make the mtime change deterministic regardless of fs granularity
+                st = p.stat()
+                os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+    (tmp / "meta.md").write_text("## 最近の出来事\n\n- 既存\n", encoding="utf-8")
+
+    orig_root = _patch("MEMORY_ROOT", tmp)
+    orig_reflection = _patch("reflection", _Refl())
+    orig_initiate = _patch("saku_self_initiate", lambda reason: calls.append(reason))
+    orig_state = _patch("load_chat_state", lambda: _mock_state())
+    orig_save = _patch("save_chat_state", lambda s: None)
+    try:
+        daemon_mod.check_and_run_midnight_reflection(datetime(2026, 8, 5, 3, 30))
+    finally:
+        _restore("MEMORY_ROOT", orig_root)
+        _restore("reflection", orig_reflection)
+        _restore("saku_self_initiate", orig_initiate)
+        _restore("load_chat_state", orig_state)
+        _restore("save_chat_state", orig_save)
+    assert len(calls) == 1, calls
+    return calls[0]
+
+
+def test_reflection_report_does_not_claim_an_update_that_did_not_happen():
+    """Issue #39: the report must only claim what the reflection actually did."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        report = _run_reflection_report(Path(tmp), touch_meta=False)
+    assert "更新はありませんでした" in report, report
+    assert "整理を完了しました" not in report, report
+
+
+def test_reflection_report_mentions_meta_when_it_was_updated():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        report = _run_reflection_report(Path(tmp), touch_meta=True)
+    assert "meta.md" in report and "整理を完了しました" in report, report
+
+
 def run_tests():
     global _PASS, _FAIL
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

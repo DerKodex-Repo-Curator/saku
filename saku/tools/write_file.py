@@ -1,8 +1,21 @@
-"""Write a file within the memory root (restricted paths only, policy from config)."""
+"""Write a file within the memory root (restricted paths only, policy from config).
 
+meta.md is special-cased: even when the path policy allows overwriting it, the
+body must keep the canonical `## ` section structure (see
+`config.META_SECTION_HEADINGS` and `memory/meta.template.md`). The model used to
+drop or rename sections when overwriting, so the rule is enforced here in code
+instead of relying on the prompt.
+"""
+
+import re
 from pathlib import Path
 
-from saku.config import get_path_policy
+from saku.config import META_SECTION_HEADINGS, get_path_policy
+
+
+def _section_headings(text: str) -> list[str]:
+    """Return the `## ` section headings of text, in document order."""
+    return [m.group(1).strip() for m in re.finditer(r"^##[ \t]+(.+?)[ \t]*$", text, re.MULTILINE)]
 
 
 def run(base: Path, path: str = "", body: str = "", **kwargs) -> str:
@@ -18,6 +31,16 @@ def run(base: Path, path: str = "", body: str = "", **kwargs) -> str:
 
     if not policy.is_write_allowed(path):
         return f"[DENY] cannot write to: {path}"
+
+    if path == "meta.md":
+        headings = _section_headings(body)
+        if headings != META_SECTION_HEADINGS:
+            expected = "、".join(f"## {h}" for h in META_SECTION_HEADINGS)
+            return (
+                "[DENY] meta.md の見出し構造は変更できません。"
+                f"期待する見出し（この順序）: {expected}。"
+                "内容の追記は [[APPEND_FILE path=\"meta.md\" heading=\"...\"]] を使ってください。"
+            )
 
     target = (base / path).resolve()
     if not target.is_relative_to(base.resolve()):

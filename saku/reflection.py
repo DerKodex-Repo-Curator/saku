@@ -17,6 +17,35 @@ from saku.agent_loop import run_agent_loop as _run_agent_loop
 # Resolve SAKU_ROOT from agent config
 SAKU_ROOT = agent.SAKU_ROOT
 
+
+def build_reflection_prompt(target_date: str, journal_content: str, monologue_content: str) -> str:
+    """Build the reflection user prompt.
+
+    The meta.md rule comes from ``agent.meta_update_rule()`` so it always agrees
+    with the system prompt and the path policy (it used to be hardcoded here,
+    which contradicted the system prompt and let the model overwrite meta.md
+    wholesale).
+    """
+    return f"""[system] 今日一日の活動を振り返り、自己修正と成長を行う時間です。
+以下に、今日の日記（Journal）と独り言（Monologue）を提示します。
+
+【今日の日記 ({target_date})】
+{journal_content if journal_content else "(空)"}
+
+【今日の独り言 ({target_date})】
+{monologue_content if monologue_content else "(空)"}
+
+これらを分析し、以下のタスクを「自律的ツール実行」によって処理してください。
+1. 新たに得られた知見、教訓、Ownerから指摘されたルールがあれば、[[WRITE_FILE path="principles/ファイル名.md"]] を使用して新規保存、または既存の教訓ファイルを修正・削除・統合して整理（メモリのデフラグ）を行ってください。
+2. 自己モデル（meta.md）の各セクションに今日の活動結果を追記する。
+   ※ {agent.meta_update_rule()}
+   「## 最近の出来事」「## 次にやりたいこと」などの見出し直後にリスト項目を追加する形式で更新し、
+   見出し構造（## で始まる行）は絶対に変更・削除しないでください。
+
+終了時は「[REFLECTION_DONE]」と出力して回答を終了してください。
+"""
+
+
 def run_reflection(target_date: str = None) -> None:
     if target_date is None:
         target_date = datetime.now().strftime("%Y-%m-%d")
@@ -36,25 +65,8 @@ def run_reflection(target_date: str = None) -> None:
 
     # Build prompt
     system_prompt = agent.build_system_prompt()
-    
-    user_prompt = f"""[system] 今日一日の活動を振り返り、自己修正と成長を行う時間です。
-以下に、今日の日記（Journal）と独り言（Monologue）を提示します。
 
-【今日の日記 ({target_date})】
-{journal_content if journal_content else "(空)"}
-
-【今日の独り言 ({target_date})】
-{monologue_content if monologue_content else "(空)"}
-
-これらを分析し、以下のタスクを「自律的ツール実行」によって処理してください。
-1. 新たに得られた知見、教訓、Ownerから指摘されたルールがあれば、[[WRITE_FILE path="principles/ファイル名.md"]] を使用して新規保存、または既存の教訓ファイルを修正・削除・統合して整理（メモリのデフラグ）を行ってください。
-2. 自己モデル（meta.md）の各セクションに今日の活動結果を追記する。
-   ※ meta.mdは WRITE_FILE での上書きが禁止。[[APPEND_FILE path="meta.md" heading="最近の出来事"]] などを使い、
-   「## 最近の出来事」「## 次にやりたいこと」などの見出し直後にリスト項目を追加する形式でのみ更新してください。
-   見出し構造（## で始まる行）は絶対に変更・削除しないでください。
-   
-終了時は「[REFLECTION_DONE]」と出力して回答を終了してください。
-"""
+    user_prompt = build_reflection_prompt(target_date, journal_content, monologue_content)
 
     history = [
         {"role": "system", "content": system_prompt},
