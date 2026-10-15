@@ -240,7 +240,7 @@ def test_inbox_run_counts_as_handled_without_writes():
     finally:
         _restore("_run_agent_loop", orig)
     assert handled is True
-    assert "[INBOX_PROCESSED]" in visible
+    assert visible == "確認しました。"  # the completion marker is not user-facing text
 
 
 def test_inbox_run_is_retried_after_llm_error():
@@ -260,6 +260,27 @@ def test_tick_run_still_reports_no_action():
     finally:
         _restore("_run_agent_loop", orig)
     assert acted is False
+
+
+def test_no_action_marker_is_stripped_before_journalling():
+    """A tick that acts and then prints [NO_ACTION] must not journal a marker entry."""
+    saved = []
+    orig_loop = _patch("_run_agent_loop", lambda *a, **k: _fake_loop_result(True, "A2Aのタスク定義を調べました。[NO_ACTION]"))
+    orig_save = daemon_mod.agent.save_autonomous_log
+    daemon_mod.agent.save_autonomous_log = lambda name, reply, thinking="": saved.append(reply)
+    try:
+        acted, visible = daemon_mod.run_agent_loop("p", "tick-test")
+        assert acted is True
+        assert visible == "A2Aのタスク定義を調べました。"
+
+        daemon_mod._run_agent_loop = lambda *a, **k: _fake_loop_result(True, "[NO_ACTION]")
+        _, marker_only = daemon_mod.run_agent_loop("p", "tick-test")
+    finally:
+        _restore("_run_agent_loop", orig_loop)
+        daemon_mod.agent.save_autonomous_log = orig_save
+
+    assert saved == ["A2Aのタスク定義を調べました。"], saved
+    assert marker_only == "", "a marker-only reply must not leave text behind"
 
 
 def run_tests():

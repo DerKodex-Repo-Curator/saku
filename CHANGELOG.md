@@ -23,6 +23,8 @@ and this project adheres to https://semver.org/spec/v2.0.0.html.
 - Web UI streams `status` SSE events alongside `visible` / `tool` / `error` / `done`.
 - DuckDuckGo result parsing: snippets containing markup (e.g. `<b>`) used to break result pairing (10 results in the HTML yielded 1–8), and the `html.duckduckgo.com` markup (`result__a` / `result__snippet`) was not recognised at all. Links and snippets are now paired in document order and both endpoints yield 10 results, so specific-name queries surface the right pages (#31).
 - Inbox scan: a file the model read but did not act on was never marked as processed, because the documented completion marker `[INBOX_PROCESSED]` counted as "no action". Such files were re-read and re-sent to the LLM on every scan (every 30 minutes, forever). A no-op run now counts as handled; a failed run is still retried.
+- Completion markers (`[NO_ACTION]` / `[INBOX_PROCESSED]`) are stripped from the reply before it is logged or journalled. A tick that acted (e.g. wrote a principle) and then printed `[NO_ACTION]` used to leave a journal entry whose whole content was the marker.
+- Web UI tests no longer touch the configured memory root: the chat test was journalling `hi` / `こんにちは` into the live vault through `/api/chat`, and the proactive test consumed the Owner's pending notification.
 - Integrated legacy `src/` into the `saku/` package: `core.py`, `daemon.py`, `reflection.py`, `tools/`. `src/` removed.
 - Tests moved to `tests/`.
 - Fixed daemon inbox scanning when `[memory] inbox_dir` points outside the memory root.

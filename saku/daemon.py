@@ -45,6 +45,10 @@ CHAT_POLL_SECONDS = _dcfg.get("chat_poll_seconds", 5)
 INBOX_POLL_SECONDS = _dcfg.get("inbox_poll_seconds", 3600)
 TICK_POLL_SECONDS = _dcfg.get("tick_interval_seconds", 1800)
 
+# Markers the agent loop treats as "completed without doing anything". They are
+# stripped before the text is logged, journalled, or shown to the Owner.
+NO_ACTION_MARKERS = ["[NO_ACTION]", "[INBOX_PROCESSED]"]
+
 ARCHIVE_AFTER_INACTIVE_SECONDS = _dcfg.get("archive_after_inactive_seconds", 1800)
 ARCHIVE_AFTER_TURNS = _dcfg.get("archive_after_turns", 10)
 AUTO_INITIATE_COOLDOWN_SECONDS = _dcfg.get("auto_initiate_cooldown_seconds", 28800)
@@ -195,6 +199,13 @@ def chat_ends_with_owner(content: str, last_content: str) -> tuple[bool, str]:
         
     return True, user_diff
 
+def _strip_no_action_markers(text: str) -> str:
+    """Remove completion markers from text shown to the Owner / written to the journal."""
+    for marker in NO_ACTION_MARKERS:
+        text = text.replace(marker, "")
+    return text.strip()
+
+
 # ── Agent loop runner ────────────────────────────────────
 def run_agent_loop(
     prompt: str, log_action_name: str, extra_history: list[dict] = None, light: bool = False, inbox_mode: bool = False
@@ -225,24 +236,30 @@ def run_agent_loop(
         agent.CODE_ROOT,
         max_turns=5,
         on_tool_result=on_tool_result,
-        no_action_markers=["[NO_ACTION]", "[INBOX_PROCESSED]"],
+        no_action_markers=NO_ACTION_MARKERS,
         log=lambda msg: logger.warning("[%s] %s", log_action_name, msg),
     )
 
-    if result.action_taken and result.last_raw and not result.last_raw.startswith("[ERROR]"):
-        agent.save_autonomous_log(log_action_name, result.visible, thinking=result.thinking)
-        logger.info("[%s] reply: %s", log_action_name, result.visible[:500])
-        return True, result.visible
+    visible = _strip_no_action_markers(result.visible)
+    errored = (not result.last_raw) or result.last_raw.startswith("[ERROR]")
+    acted = result.action_taken and not errored
 
-    logger.info("[%s] no-action reply: %s", log_action_name, result.visible[:500])
+    if acted:
+        # A tick can act (write a principle) and still end with [NO_ACTION]: never
+        # store a journal entry whose whole content is the marker.
+        if visible:
+            agent.save_autonomous_log(log_action_name, visible, thinking=result.thinking)
+        logger.info("[%s] reply: %s", log_action_name, visible[:500] or "(no text)")
+    else:
+        logger.info("[%s] no-action reply: %s", log_action_name, visible[:500] or "(no text)")
 
     if inbox_mode:
         # An inbox file only needs handling once. The model signals completion with
         # [INBOX_PROCESSED] whether or not it wrote anything, so "nothing to save"
         # is a valid outcome; only a failed run (no reply / [ERROR]) is retried.
         # Without this, such files were re-read on every scan and re-ran the LLM.
-        return bool(result.last_raw) and not result.last_raw.startswith("[ERROR]"), result.visible
-    return False, result.visible
+        return not errored and bool(result.last_raw), visible
+    return acted, visible
 
 # ── Chat: reply ──────────────────────────────────────────
 def check_chat_and_reply() -> None:
