@@ -133,6 +133,92 @@ def test_dreaming_catchup_on_startup():
     assert saved.get("last_dream_date")
 
 
+def test_owner_message_gets_reply_appended():
+    """chat.md message ending with '>' must produce an appended SAKU reply."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        chat = Path(tmp) / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        chat.write_text(header, encoding="utf-8")
+        state = {"last_mtime": chat.stat().st_mtime, "last_content": header, "turn_count": 0}
+        prompts = {}
+
+        def _fake_loop(prompt, log_action_name, extra_history=None, **kw):
+            prompts["prompt"] = prompt
+            prompts["light"] = kw.get("light")
+            return True, "おかえりなさい。"
+
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "load_chat_state": daemon_mod.load_chat_state,
+            "save_chat_state": daemon_mod.save_chat_state,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+            "get_pending_requests": daemon_mod.get_pending_requests,
+            "check_chat_archive_if_needed": daemon_mod.check_chat_archive_if_needed,
+            "build_recall_message": daemon_mod.agent.build_recall_message,
+        }
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.load_chat_state = lambda: state
+        daemon_mod.save_chat_state = lambda s: None
+        daemon_mod.run_agent_loop = _fake_loop
+        daemon_mod.get_pending_requests = lambda: ""
+        daemon_mod.check_chat_archive_if_needed = lambda s: None
+        daemon_mod.agent.build_recall_message = lambda msg: None
+        try:
+            chat.write_text(header + "\n\n今日はどう？ >\n", encoding="utf-8")
+            daemon_mod.check_chat_and_reply()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.load_chat_state = originals["load_chat_state"]
+            daemon_mod.save_chat_state = originals["save_chat_state"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+            daemon_mod.get_pending_requests = originals["get_pending_requests"]
+            daemon_mod.check_chat_archive_if_needed = originals["check_chat_archive_if_needed"]
+            daemon_mod.agent.build_recall_message = originals["build_recall_message"]
+
+        text = chat.read_text(encoding="utf-8")
+        assert "**Owner**" in text, "Owner block was not formatted into chat.md"
+        assert "**SAKU**" in text, "SAKU reply block missing"
+        assert "おかえりなさい" in text
+        assert prompts.get("prompt", "").find("今日はどう？") >= 0
+        assert prompts.get("light") is True, "chat replies must use the light prompt"
+        assert state["turn_count"] == 1
+
+
+def test_owner_message_without_trigger_is_ignored():
+    """A chat.md edit that does not end with '>' must not call the LLM."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        chat = Path(tmp) / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        chat.write_text(header, encoding="utf-8")
+        state = {"last_mtime": chat.stat().st_mtime, "last_content": header}
+        called = {"n": 0}
+
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "load_chat_state": daemon_mod.load_chat_state,
+            "save_chat_state": daemon_mod.save_chat_state,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+        }
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.load_chat_state = lambda: state
+        daemon_mod.save_chat_state = lambda s: None
+        daemon_mod.run_agent_loop = lambda *a, **k: called.__setitem__("n", called["n"] + 1)
+        try:
+            chat.write_text(header + "\n\n下書き中\n", encoding="utf-8")
+            daemon_mod.check_chat_and_reply()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.load_chat_state = originals["load_chat_state"]
+            daemon_mod.save_chat_state = originals["save_chat_state"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+        assert called["n"] == 0, "the LLM ran without a '>' trigger"
+        assert "**SAKU**" not in chat.read_text(encoding="utf-8")
+
+
 def run_tests():
     global _PASS, _FAIL
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
