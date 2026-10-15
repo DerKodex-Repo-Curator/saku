@@ -4,60 +4,77 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 class DDGLiteParser(HTMLParser):
+    """Extract (title, url, snippet) triples from DuckDuckGo search HTML.
+
+    DuckDuckGo serves two variants with different class names:
+    ``lite.duckduckgo.com`` uses ``result-link`` / ``result-snippet`` and
+    ``html.duckduckgo.com`` uses ``result__a`` / ``result__snippet``. Links and
+    snippets live in separate elements, so both are collected in document order and
+    paired afterwards. Only the element that opened a snippet is tracked, so nested
+    markup (e.g. ``<b>`` inside a snippet) no longer breaks the pairing.
+    """
+
+    LINK_CLASSES = ("result-link", "result__a")
+    SNIPPET_CLASSES = ("result-snippet", "result__snippet")
+
     def __init__(self):
         super().__init__()
-        self.results = []
-        self.current_result = {}
-        self.in_snippet_td = False
-        self.snippet_depth = 0
-        self.link_depth = 0
-        self.current_href = ""
-        self.temp_text = []
+        self.links = []
+        self.snippets = []
+        self._in_link = False
+        self._link_href = ""
+        self._link_text = []
+        self._snippet_tag = ""
+        self._snippet_depth = 0
+        self._snippet_text = []
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
-        # Result title link is inside an 'a' tag with class 'result-link'
-        if tag == "a" and "result-link" in attrs_dict.get("class", ""):
-            # Parse actual destination URL from DDG redirection if necessary
-            # (Lite version links are usually direct, but let's extract href)
+        cls = attrs_dict.get("class", "")
+        if tag == "a" and any(c in cls for c in self.LINK_CLASSES):
+            self._in_link = True
             href = attrs_dict.get("href", "")
             if href.startswith("//"):
                 href = "https:" + href
-            self.current_href = href
-            self.link_depth = 1
-            self.temp_text = []
-        elif tag == "td" and "result-snippet" in attrs_dict.get("class", ""):
-            self.in_snippet_td = True
-            self.snippet_depth = 1
-            self.temp_text = []
+            self._link_href = href
+            self._link_text = []
+        elif self._snippet_tag:
+            if tag == self._snippet_tag:
+                self._snippet_depth += 1
+        elif any(c in cls for c in self.SNIPPET_CLASSES):
+            self._snippet_tag = tag
+            self._snippet_depth = 1
+            self._snippet_text = []
 
     def handle_endtag(self, tag):
-        if self.link_depth > 0:
-            if tag == "a":
-                self.link_depth = 0
-                title = "".join(self.temp_text).strip()
-                if title:
-                    self.current_result["title"] = title
-                    self.current_result["url"] = self.current_href
-            else:
-                self.link_depth += 1
-        elif self.in_snippet_td:
-            if tag == "td":
-                self.snippet_depth -= 1
-                if self.snippet_depth == 0:
-                    self.in_snippet_td = False
-                    snippet = "".join(self.temp_text).strip()
-                    # Clean up double spacing and weird spaces
-                    snippet = " ".join(snippet.split())
-                    self.current_result["snippet"] = snippet
-                    self.results.append(self.current_result)
-                    self.current_result = {}
-            else:
-                self.snippet_depth += 1
+        if self._in_link and tag == "a":
+            self._in_link = False
+            title = "".join(self._link_text).strip()
+            if title:
+                self.links.append((self._link_href, title))
+        elif self._snippet_tag and tag == self._snippet_tag:
+            self._snippet_depth -= 1
+            if self._snippet_depth == 0:
+                self.snippets.append(" ".join("".join(self._snippet_text).split()))
+                self._snippet_tag = ""
+                self._snippet_text = []
 
     def handle_data(self, data):
-        if self.link_depth > 0 or self.in_snippet_td:
-            self.temp_text.append(data)
+        if self._in_link:
+            self._link_text.append(data)
+        elif self._snippet_tag:
+            self._snippet_text.append(data)
+
+    def results(self) -> list[dict]:
+        """Pair link titles with snippets in document order."""
+        out = []
+        for i, (href, title) in enumerate(self.links):
+            out.append({
+                "title": title,
+                "url": href,
+                "snippet": self.snippets[i] if i < len(self.snippets) else "",
+            })
+        return out
 
 def _extract_real_url(href: str) -> str:
     """Unwrap DuckDuckGo redirect (//duckduckgo.com/l/?uddg=...)."""
@@ -86,11 +103,12 @@ def _fetch_and_parse(query: str, url: str, timeout: int = 15) -> list[dict]:
         html = response.read().decode("utf-8", errors="replace")
     parser = DDGLiteParser()
     parser.feed(html)
+    results = parser.results()
     # Unwrap redirect URLs
-    for r in parser.results:
+    for r in results:
         if "url" in r:
             r["url"] = _extract_real_url(r["url"])
-    return parser.results
+    return results
 
 
 DEFAULT_RESULT_LIMIT = 5
