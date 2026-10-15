@@ -230,6 +230,58 @@ def test_list_tool_calls():
     assert transport.list_tool_calls("ただの文章") == []
 
 
+def test_final_answer_rescue_when_all_turns_use_tools():
+    """A tool-only reply loop must still surface an answer to the caller."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "tools").mkdir()
+        (root / "tools" / "echo.py").write_text(
+            "def run(base, path, body='', **kw):\n    return 'echo:' + body\n",
+            encoding="utf-8",
+        )
+
+        calls = {"n": 0}
+
+        def fake_chat_stream(history, llm_cfg, on_token=None):
+            calls["n"] += 1
+            # The rescue call carries the "no more tools" instruction
+            last = str(history[-1].get("content", ""))
+            if "ツールはもう使えません" in last:
+                return "集めた情報から: 回答です。"
+            return f"[[ECHO]]\ncall{calls['n']}\n[[END]]"
+
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = fake_chat_stream
+        try:
+            result = agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root, max_turns=2,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+        assert "回答です" in result.visible
+        assert calls["n"] == 3  # 2 tool turns + 1 rescue
+
+
+def test_no_rescue_when_visible_answer_exists():
+    def fake_chat_stream(history, llm_cfg, on_token=None):
+        return "普通の回答"
+
+    llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+    original = agent_loop.chat_stream
+    agent_loop.chat_stream = fake_chat_stream
+    try:
+        result = agent_loop.run_agent_loop(
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+            llm, _make_ctx(), Path("/tmp"), Path("/tmp"),
+        )
+    finally:
+        agent_loop.chat_stream = original
+    assert result.visible == "普通の回答"
+
+
 def test_strip_tool_blocks():
     from saku.thinking import strip_tool_blocks
 

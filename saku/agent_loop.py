@@ -135,6 +135,29 @@ def run_agent_loop(
         work.append({"role": "user", "content": f"[system] tool results:\n{tool_output}"})
         turn += 1
 
+    # Final-answer rescue: a research-style turn can spend every turn on tools (or the
+    # repeat guard halts the loop), leaving the caller with nothing to show. Ask once
+    # more, explicitly without tools, and use that as the visible answer.
+    if not current_visible and not last_raw.startswith("[ERROR]"):
+        _status("writing answer")
+        rescue_history = list(work) + [
+            {
+                "role": "user",
+                "content": (
+                    "[system] ツールはもう使えません。これまでに得た結果だけを使って、"
+                    "最終的な回答を書いてください。"
+                ),
+            }
+        ]
+        raw_final = chat_stream(rescue_history, llm_cfg, on_token=on_visible)
+        if raw_final and not raw_final.startswith("[ERROR]"):
+            _thinking, visible_final = split_thinking(raw_final)
+            clean_final = strip_tool_blocks(visible_final).strip()
+            if clean_final:
+                current_visible.append(clean_final)
+                work.append({"role": "assistant", "content": clean_final})
+                last_raw = raw_final
+
     return LoopResult(
         visible="\n\n".join(current_visible).strip(),
         thinking="\n\n".join(current_thinking).strip(),
