@@ -93,10 +93,57 @@ def _fetch_and_parse(query: str, url: str, timeout: int = 15) -> list[dict]:
     return parser.results
 
 
+DEFAULT_RESULT_LIMIT = 5
+MAX_RESULT_LIMIT = 10
+
+
+def _domain(url: str) -> str:
+    try:
+        return urllib.parse.urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
+
+def _dedupe_by_domain(results: list[dict]) -> list[dict]:
+    """Keep the first result per domain, then the rest (diversity first).
+
+    A generic query ("latest local LLM 2026") can fill every slot with one
+    aggregator site and bury specific, newer sources. Ranking distinct domains
+    first keeps room for them (refs #31).
+    """
+    seen = set()
+    primary, rest = [], []
+    for r in results:
+        d = _domain(r.get("url", ""))
+        if d and d not in seen:
+            seen.add(d)
+            primary.append(r)
+        else:
+            rest.append(r)
+    return primary + rest
+
+
+def _format_results(results: list[dict], limit: int = DEFAULT_RESULT_LIMIT) -> str:
+    """Format search results as numbered title/URL/summary blocks."""
+    formatted = []
+    for i, r in enumerate(_dedupe_by_domain(results)[:limit]):
+        title = r.get("title", "No Title")
+        link = r.get("url", "")
+        snippet = r.get("snippet", "")
+        formatted.append(f"[{i+1}] {title}\nURL: {link}\nSummary: {snippet}\n")
+    return "\n".join(formatted)
+
+
 def run(base: Path, path: str = "", body: str = "", **kwargs) -> str:
     query = body.strip() or kwargs.get("query", "").strip()
     if not query:
         return "[ERROR] Query is empty."
+
+    try:
+        limit = int(str(kwargs.get("limit", DEFAULT_RESULT_LIMIT)))
+    except ValueError:
+        limit = DEFAULT_RESULT_LIMIT
+    limit = max(1, min(limit, MAX_RESULT_LIMIT))
 
     print(f"[*] Web searching for: {query}")
     urls = [
@@ -108,15 +155,7 @@ def run(base: Path, path: str = "", body: str = "", **kwargs) -> str:
         try:
             results = _fetch_and_parse(query, url, timeout=15)
             if results:
-                formatted_results = []
-                for i, r in enumerate(results[:5]):
-                    title = r.get("title", "No Title")
-                    link = r.get("url", "")
-                    snippet = r.get("snippet", "")
-                    formatted_results.append(
-                        f"[{i+1}] {title}\nURL: {link}\nSummary: {snippet}\n"
-                    )
-                return "\n".join(formatted_results)
+                return _format_results(results, limit)
             last_error = "No results found."
         except Exception as e:
             last_error = str(e)

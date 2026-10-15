@@ -46,7 +46,7 @@ SAKU comes with a built-in set of tools located in `saku/tools/`:
 | `WRITE_FILE` | Writes or overwrites a text file in allowed memory sub-directories. |
 | `APPEND_FILE` | Appends content to a file. Supports `heading=` to insert under a specific `##` section. |
 | `SEARCH_NOTES` | Performs a case-insensitive keyword search on markdown files inside the vault. |
-| `WEB_SEARCH` | Searches the web via DuckDuckGo Lite (no API key needed). |
+| `WEB_SEARCH` | Searches the web via DuckDuckGo Lite (no API key needed). Distinct domains are ranked first; `limit=` (1–10, default 5) caps the results. |
 | `FETCH_URL` | Fetches and returns the text content of a web page. |
 | `EXECUTE_CODE` | Runs Python code inside the sandboxed `study/` directory (5s timeout). |
 | `DELETE_FILE` | Deletes a file in allowed directories (blocks system files and `saku/tools/`). |
