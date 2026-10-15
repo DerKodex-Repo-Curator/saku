@@ -14,11 +14,14 @@ and this project adheres to https://semver.org/spec/v2.0.0.html.
 - `WEB_SEARCH` ranks distinct domains first (one aggregator can no longer fill every slot) and accepts `limit=` (1–10, default 5) (#31).
 - Agent status events for the Web UI (#27): `thinking` / `tool: NAME` / `compacting context`, rendered as a pulsing indicator so a busy agent is distinguishable from a frozen one.
 - `saku status`: read-only growth summary (MEMORY.md entry counts, score spread, archive count, wiki/principles/skills/children/journal/monologue sizes).
+- LLM profiles accept `reasoning_effort` and `stop_tokens`. Reasoning engines that return the answer in `reasoning_content` (e.g. Strata / Qwen3.8-Flash-Next) can be driven with `reasoning_effort = "none"`, and engines that cap the number of stop strings (Strata allows 4) can override the default list. Both are omitted unless configured (#35).
+- Final-answer rescue in the agent loop: when every turn is spent on tool calls (or the repeat guard halts the loop), one last call that forbids tools produces the visible answer, so research-style requests no longer return an empty reply.
 
 ### Changed
 
 - Research guidance in the system prompt now asks for an overview search followed by per-name searches, and for wiki summaries that include specifics and source URLs (#31).
 - Web UI streams `status` SSE events alongside `visible` / `tool` / `error` / `done`.
+- DuckDuckGo result parsing: snippets containing markup (e.g. `<b>`) used to break result pairing (10 results in the HTML yielded 1–8), and the `html.duckduckgo.com` markup (`result__a` / `result__snippet`) was not recognised at all. Links and snippets are now paired in document order and both endpoints yield 10 results, so specific-name queries surface the right pages (#31).
 - Integrated legacy `src/` into the `saku/` package: `core.py`, `daemon.py`, `reflection.py`, `tools/`. `src/` removed.
 - Tests moved to `tests/`.
 - Fixed daemon inbox scanning when `[memory] inbox_dir` points outside the memory root.

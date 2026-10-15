@@ -129,11 +129,31 @@ def test_chat_sse_status_and_page():
 
 
 def test_proactive():
-    server = _start_server()
+    """GET /api/proactive returns the daemon's notification and then clears it.
+
+    Uses a temporary inbox: the endpoint consumes the file, so pointing it at the
+    live memory root made the assertion depend on daemon timing and silently ate
+    the Owner's pending notification.
+    """
+    import shutil
+    import tempfile
+
+    tmpdir = Path(tempfile.mkdtemp())
+    inbox = tmpdir / "ui_inbox.json"
+    original_inbox = ui._UI_INBOX
+    ui._UI_INBOX = inbox
     try:
-        assert json.loads(_get(server, "/api/proactive")) == {}
+        server = _start_server()
+        try:
+            assert json.loads(_get(server, "/api/proactive")) == {}
+            inbox.write_text(json.dumps({"message": "お知らせ"}, ensure_ascii=False), encoding="utf-8")
+            assert json.loads(_get(server, "/api/proactive")) == {"message": "お知らせ"}
+            assert json.loads(_get(server, "/api/proactive")) == {}
+        finally:
+            _stop(server)
     finally:
-        _stop(server)
+        ui._UI_INBOX = original_inbox
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def test_requests_endpoint():
