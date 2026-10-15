@@ -197,6 +197,19 @@ DEFAULT_WRITE_ALLOWED = [
 DEFAULT_WRITE_DENIED_EXACT = ["meta.md"]
 DEFAULT_DELETE_DENIED_EXACT = ["meta.md", "chat.md", "request_list.md", "genome.md", "soul.md"]
 
+# Canonical section structure of meta.md (the self-model). Must match
+# memory/meta.template.md: the template forbids changing the `## ` headings,
+# so the WRITE_FILE guard in tools/write_file.py refuses a body whose section
+# headings differ from this list (order included).
+META_SECTION_HEADINGS = [
+    "現在の状態",
+    "得意なこと",
+    "苦手なこと",
+    "最近の出来事",
+    "次にやりたいこと",
+    "更新ルール",
+]
+
 
 @dataclass
 class PathPolicy:

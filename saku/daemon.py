@@ -584,21 +584,16 @@ def archive_chat() -> None:
     today = datetime.now().strftime("%Y-%m-%d")
     now_str = datetime.now().strftime("%H:%M")
 
-    meta_append_only = "meta.md" in agent.saku_config.get_path_policy().write_denied_exact
-    meta_update_rule = (
-        "※重要: meta.mdは WRITE_FILE での上書きが禁止されています。必ず [[APPEND_FILE path=\"meta.md\" heading=\"最近の出来事\"]] を使い、\n"
-        "   既存の「## 最近の出来事」セクションの末尾に「- {today}: （概要）」の形式で1行だけ追記してください。\n"
-        "   見出し構造（## で始まる行）は絶対に変更・削除しないでください。"
-        if meta_append_only
-        else "※meta.md は WRITE_FILE で編集可能です。既存の ## 見出し構造を尊重しつつ「## 最近の出来事」に概要を追記してください。"
-    )
+    meta_update_rule = agent.meta_update_rule()
 
     prompt = f"""[system] chat.mdの会話アーカイブ処理を行います。
 以下の会話履歴（{len(chat_history)}件のメッセージ）を分析し、以下のタスクを実行してください。
 
 1. 新しい教訓や重要な気づきがあれば [[WRITE_FILE path="principles/{today}-chat-archive.md"]] に記録する。
 2. 自己モデル（meta.md）の「最近の出来事」セクションに今日のchat概要を1行追記する。
-   {meta_update_rule}
+   ※ {meta_update_rule}
+   追記には [[APPEND_FILE path="meta.md" heading="最近の出来事"]] を使い、「- {today}: （概要）」の形式で1行だけにする。
+   見出し構造（## で始まる行）は絶対に変更・削除しない。
 3. すべて完了したら「[ARCHIVE_DONE]」と出力してください。
 
 （注: journal/ への書き込みは制限されています。principles/ や meta.md を使用してください）
@@ -660,9 +655,9 @@ def check_autonomous_tick() -> None:
     today = datetime.now().strftime("%Y-%m-%d")
     print(f"[*] Starting periodic autonomous tick at {now_str}...")
 
-    meta_writable = "meta.md" not in agent.saku_config.get_path_policy().write_denied_exact
+    meta_writable = not agent.meta_append_only()
     meta_update_rule = (
-        f'[[WRITE_FILE path="meta.md"]] で編集してください。'
+        '[[WRITE_FILE path="meta.md"]] で編集してください。ただし見出し構造（## で始まる行）は変更・削除・追加しないでください。'
         if meta_writable
         else '[[APPEND_FILE path="meta.md" heading="次にやりたいこと"]] で追記してください（WRITE_FILEでの上書きは禁止です）。'
     )

@@ -53,6 +53,31 @@ def switch_llm_profile(profile_name: str) -> str:
     _current_llm = llm
     return f"[OK] Switched to profile: {profile_name} (API: {llm.api_url}, Model: {llm.model})"
 
+
+def meta_append_only() -> bool:
+    """True when the path policy forbids WRITE_FILE overwrites of meta.md."""
+    return "meta.md" in saku_config.get_path_policy().write_denied_exact
+
+
+def meta_update_rule() -> str:
+    """Single source of truth for how the LLM may update meta.md.
+
+    Derived from the path policy so every prompt (system prompt, reflection,
+    chat archive, autonomous tick) tells the model the same thing. The heading
+    structure is validated in code by tools/write_file.py either way.
+    """
+    headings = "、".join(f"## {h}" for h in saku_config.META_SECTION_HEADINGS)
+    if meta_append_only():
+        return (
+            "追記（`[[APPEND_FILE path=\"meta.md\" heading=\"...\"]]`）のみ。"
+            "`WRITE_FILE` での上書きは禁止。"
+        )
+    return (
+        f"`WRITE_FILE` で上書き可能。編集時は既存の ## 見出し構造（{headings}）を尊重し、"
+        "セクションの追加・整理・更新を行ってよい。"
+        "※見出し構造を変更した WRITE_FILE はコード側で拒否される。"
+    )
+
 MAX_GENOME_CHARS = 4000
 MAX_META_CHARS = 4000
 MAX_MEMORY_CHARS = 3000
@@ -286,16 +311,7 @@ def _build_static_sections() -> str:
     _policy = saku_config.get_path_policy()
     _write_allowed = ", ".join(_policy.write_allowed)
     _write_denied = ", ".join(_policy.write_denied_exact)
-    if "meta.md" in _policy.write_denied_exact:
-        _meta_update_rule = (
-            "追記（`[[APPEND_FILE path=\"meta.md\" heading=\"...\"]]`）のみ。`WRITE_FILE` での上書きは禁止。"
-        )
-    else:
-        _meta_update_rule = (
-            "`WRITE_FILE` で上書き可能。編集時は既存の ## 見出し構造（## 現在の状態、## 得意なこと、"
-            "## 苦手なこと、## 最近の出来事、## 次にやりたいこと、## 更新ルール）を尊重し、"
-            "セクションの追加・整理・更新を行ってよい。"
-        )
+    _meta_update_rule = meta_update_rule()
 
     # MCP tools (external servers) — only if configured; empty otherwise.
     _mcp_desc = ""
