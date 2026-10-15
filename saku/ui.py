@@ -7,7 +7,7 @@ Mechanism:
 - http.server.ThreadingHTTPServer runs a local server
 - GET  /                    → single-page HTML (chat UI)
 - POST /api/chat             → accepts {message} and runs run_agent_loop
-- Response is text/event-stream; visible tokens, tool runs, and completion are sent as events
+- Response is text/event-stream; status, visible tokens, tool runs, and completion are sent as events
 - GET  /api/health           → health check
 - GET  /api/proactive        → fetches autonomous messages (proactive messages/alerts) written by the daemon
 
@@ -62,6 +62,11 @@ PAGE = """<!doctype html>
   .msg.saku .body { display:inline-block; background:var(--panel); padding:8px 12px; border-radius:10px; }
   .msg .name.user { color:#9ece6a; } .msg .name.saku { color:var(--accent); }
   .tool { color:#e0af68; font-size:0.85em; margin:4px 0; }
+  .status { color:#7aa2f7; font-size:0.85em; margin:4px 0; font-style:italic;
+            display:flex; align-items:center; gap:6px; }
+  .status::before { content:""; width:7px; height:7px; border-radius:50%; background:#7aa2f7;
+                    animation:pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:.25; transform:scale(.8); } 50% { opacity:1; transform:scale(1); } }
   .error { color:#f7768e; }
   #proactive { position:fixed; right:16px; bottom:80px; background:var(--panel);
                border:1px solid var(--accent); border-radius:8px; padding:10px 14px;
@@ -128,6 +133,25 @@ function addTool(text) {
   msgBox.append(el);
   msgBox.scrollTop = msgBox.scrollHeight;
 }
+let statusEl = null;
+function setStatus(text) {
+  if (!statusEl) {
+    statusEl = document.createElement("div");
+    statusEl.className = "status";
+    msgBox.append(statusEl);
+  }
+  statusEl.textContent = text;
+  msgBox.scrollTop = msgBox.scrollHeight;
+}
+function clearStatus() {
+  if (statusEl) { statusEl.remove(); statusEl = null; }
+}
+const STATUS_LABELS = { "thinking": "考えています", "compacting context": "文脈を整理しています" };
+function statusLabel(text) {
+  if (STATUS_LABELS[text]) return STATUS_LABELS[text];
+  if (text.indexOf("tool: ") === 0) return "ツール実行: " + text.slice(6);
+  return text;
+}
 
 async function send() {
   const text = input.value.trim();
@@ -153,9 +177,11 @@ async function send() {
       if (!evt.startsWith("data:")) continue;
       try {
         const data = JSON.parse(evt.slice(5).trim());
-        if (data.type === "visible") sakuBody.textContent += data.text;
-        else if (data.type === "tool") addTool(data.text);
-        else if (data.type === "error") { sakuBody.classList.add("error"); sakuBody.textContent = data.text; }
+        if (data.type === "visible") { clearStatus(); sakuBody.textContent += data.text; }
+        else if (data.type === "tool") { clearStatus(); addTool(data.text); }
+        else if (data.type === "status") setStatus(statusLabel(data.text));
+        else if (data.type === "error") { clearStatus(); sakuBody.classList.add("error"); sakuBody.textContent = data.text; }
+        else if (data.type === "done") clearStatus();
       } catch (e) {}
     }
   }
@@ -320,6 +346,7 @@ class Handler(BaseHTTPRequestHandler):
                 agent.CODE_ROOT,
                 on_visible=lambda t: self._emit({"type": "visible", "text": t}),
                 on_tool_result=lambda t: self._emit({"type": "tool", "text": t}),
+                on_status=lambda s: self._emit({"type": "status", "text": s}),
             )
             with _sessions_lock:
                 _sessions[client_id] = result.history

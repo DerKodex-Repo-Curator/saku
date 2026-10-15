@@ -92,6 +92,22 @@ def _normalize_alternative_calls(raw: str) -> str:
     return raw
 
 
+def list_tool_calls(raw: str) -> list[str]:
+    """Return the names of the tools a raw LLM reply asks to run (order preserved).
+
+    Used for status display ("thinking" vs "running a tool") so the caller can tell
+    a busy agent from a frozen one. Only start tags (``[[NAME ...]]``) are collected;
+    the closing ``[[END]]`` marker is not a tool.
+    """
+    names: list[str] = []
+    for m in re.finditer(r"\[\[([A-Z_]+)\s*(.*?)\]\]", raw):
+        name = m.group(1)
+        if name == "END" or name in names:
+            continue
+        names.append(name)
+    return names
+
+
 def exec_tools(raw: str, memory_root: Path, code_root: Path) -> list[str]:
     """Parse and execute [[TOOL ...]] blocks.
 

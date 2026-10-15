@@ -186,6 +186,50 @@ def test_run_agent_loop_error_breaks():
     assert result.visible == ""
 
 
+def test_status_events_report_progress():
+    """on_status reports "thinking" and tool execution so a UI can show liveness."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "tools").mkdir()
+        (root / "tools" / "echo.py").write_text(
+            "def run(base, path, body='', **kw):\n    return 'echo:' + body\n",
+            encoding="utf-8",
+        )
+
+        def fake_chat_stream(history, llm_cfg, on_token=None):
+            has_result = any(
+                m.get("role") == "user" and "[system] tool results:" in str(m.get("content", ""))
+                for m in history
+            )
+            return "完了" if has_result else "[[ECHO]]\nhi\n[[END]]"
+
+        statuses = []
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = fake_chat_stream
+        try:
+            agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root,
+                on_status=statuses.append,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+        assert statuses.count("thinking") >= 1
+        assert "tool: ECHO" in statuses
+
+
+def test_list_tool_calls():
+    from saku import transport
+
+    raw = '[[SEARCH_NOTES]]\nfoo\n[[END]]\nそして\n[[WEB_SEARCH query="x"]]\n[[END]]'
+    assert transport.list_tool_calls(raw) == ["SEARCH_NOTES", "WEB_SEARCH"]
+    # [[END]] is a closing marker, not a tool; duplicates collapse
+    assert transport.list_tool_calls("[[A]]\n[[END]]\n[[A]]\n[[END]]") == ["A"]
+    assert transport.list_tool_calls("ただの文章") == []
+
+
 def test_strip_tool_blocks():
     from saku.thinking import strip_tool_blocks
 

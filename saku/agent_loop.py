@@ -20,7 +20,7 @@ from .config import ContextConfig, DEFAULT_WORKING_BUDGET_TOKENS, LlmConfig
 from .context import needs_compaction, trim_old_tool_results, truncate_history
 from .llm import chat_stream
 from .thinking import split_thinking, strip_tool_blocks
-from .transport import exec_tools
+from .transport import exec_tools, list_tool_calls
 
 
 @dataclass
@@ -43,6 +43,7 @@ def run_agent_loop(
     max_turns: int = 5,
     on_visible: Optional[Callable[[str], None]] = None,
     on_tool_result: Optional[Callable[[str], None]] = None,
+    on_status: Optional[Callable[[str], None]] = None,
     no_action_markers: Optional[list[str]] = None,
     log: Optional[Callable[[str], None]] = None,
 ) -> LoopResult:
@@ -51,9 +52,17 @@ def run_agent_loop(
     In history, index 0 is the system prompt and the tail holds the most recent
     user/assistant messages. The loop operates on a copy and returns the final
     state via the ``history`` field of the result.
+
+    ``on_status`` reports coarse state changes ("thinking", "tool: NAME",
+    "compacting context") so a UI can show that the agent is working rather than
+    frozen. It is optional and silent when not given.
     """
     budget = llm_cfg.working_budget_tokens or DEFAULT_WORKING_BUDGET_TOKENS
     work = list(history)
+
+    def _status(text: str) -> None:
+        if on_status is not None:
+            on_status(text)
 
     current_visible: list[str] = []
     current_thinking: list[str] = []
@@ -68,11 +77,13 @@ def run_agent_loop(
 
         # 2. Compact history if the working budget is exceeded
         if needs_compaction(work, budget, ctx):
+            _status("compacting context")
             work, dropped = truncate_history(work, ctx.keep_recent_tokens)
             if log:
                 log(f"context compacted: dropped {dropped} chars, history={len(work)} msgs")
 
         # 3. LLM call
+        _status("thinking")
         raw_reply = chat_stream(work, llm_cfg, on_token=on_visible)
         last_raw = raw_reply
 
@@ -98,6 +109,9 @@ def run_agent_loop(
         work.append({"role": "assistant", "content": clean_visible or visible})
 
         # 5. Execute tools
+        tool_names = list_tool_calls(raw_reply)
+        if tool_names:
+            _status("tool: " + ", ".join(tool_names))
         tool_results = exec_tools(raw_reply, memory_root, code_root)
         if not tool_results:
             break
