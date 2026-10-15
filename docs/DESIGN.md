@@ -172,9 +172,12 @@ memory/
 | C-2 | MCP client (external server + tools/list discovery) | ✅ Done |
 | C-3 | MCP server (expose memory/tools via Bearer + PathPolicy) | ✅ Done |
 | D-1 | `MEMORY.md` + `dreaming.py` (journal/monologue→scored→promotion) | ✅ Done |
+| D-1+ | Growth review: importance score, reinforcement, TTL decay to `Archive` (#38) | ✅ Done |
 | D-2 | `wiki/` self-organized KB (create/link/index) | ✅ Done |
 | D-3 | Child agent infra (`SPAWN_CHILD`/`DELEGATE`, `children/`, depth guard) | ✅ Done (infra; autonomous use incremental) |
-| E | Home NOC/SOC | Not started |
+| — | Dialog: light-prompt memory recall (#32), search diversity (#31), status events (#27) | ✅ Done |
+| E | Home NOC/SOC | Not started (runtime boundary pending, #36) |
+| — | Harness: in-house loop vs external (pi / goose) | Open question, #37 |
 
 ## Dialog / Growth / Processing Separation (2026-08)
 
