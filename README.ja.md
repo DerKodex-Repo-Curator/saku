@@ -80,6 +80,7 @@ uv run python -m saku.ui
 uv run python -m saku.cli chat      # ターミナル対話
 uv run python -m saku.cli daemon    # daemonのみ
 uv run python -m saku.cli dream     # dreaming（記憶昇格）を手動実行
+uv run python -m saku.cli status    # 成長のサマリ（記憶/wikiの件数、読み取り専用）
 uv run python -m saku.ui --no-daemon  # Web UIのみ（自動ループなし）
 ```
 

@@ -13,6 +13,7 @@ and this project adheres to https://semver.org/spec/v2.0.0.html.
 - Light-prompt memory recall (#32): lines related to the current message are prefetched from `MEMORY.md` / `principles/` / `wiki/` and injected as a system message, so chat keeps continuity without the full prompt. Configured via `[recall]` (`enabled` / `items` / `max_chars` / `sources`). Wired into the Web UI chat and the daemon chat.md reply path.
 - `WEB_SEARCH` ranks distinct domains first (one aggregator can no longer fill every slot) and accepts `limit=` (1–10, default 5) (#31).
 - Agent status events for the Web UI (#27): `thinking` / `tool: NAME` / `compacting context`, rendered as a pulsing indicator so a busy agent is distinguishable from a frozen one.
+- `saku status`: read-only growth summary (MEMORY.md entry counts, score spread, archive count, wiki/principles/skills/children/journal/monologue sizes).
 
 ### Changed
 
