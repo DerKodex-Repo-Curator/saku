@@ -100,6 +100,34 @@ def test_chat_sse_error():
         _stop(server)
 
 
+def test_chat_sse_status_and_page():
+    """SSE carries status events (thinking / tool), and the page renders them."""
+    server = _start_server()
+    try:
+        import saku.agent_loop as al
+
+        original = al.chat_stream
+        al.chat_stream = lambda history, llm_cfg, on_token=None: "こんにちは"
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{server._test_port}/api/chat",
+                data=json.dumps({"message": "hi", "client_id": "t-status"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read().decode("utf-8")
+        finally:
+            al.chat_stream = original
+        assert '"type": "status"' in body
+        assert '"thinking"' in body
+
+        page = _get(server, "/").decode("utf-8")
+        assert 'data.type === "status"' in page
+        assert "考えています" in page
+    finally:
+        _stop(server)
+
+
 def test_proactive():
     server = _start_server()
     try:
