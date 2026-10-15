@@ -219,6 +219,49 @@ def test_owner_message_without_trigger_is_ignored():
         assert "**SAKU**" not in chat.read_text(encoding="utf-8")
 
 
+def _fake_loop_result(action_taken: bool, last_raw: str, visible: str = ""):
+    from saku.agent_loop import LoopResult
+
+    return LoopResult(
+        visible=visible or last_raw,
+        thinking="",
+        last_raw=last_raw,
+        history=[],
+        action_taken=action_taken,
+        turns=1,
+    )
+
+
+def test_inbox_run_counts_as_handled_without_writes():
+    """'Nothing to save' is a valid outcome: otherwise the file reruns every scan."""
+    orig = _patch("_run_agent_loop", lambda *a, **k: _fake_loop_result(False, "確認しました。[INBOX_PROCESSED]"))
+    try:
+        handled, visible = daemon_mod.run_agent_loop("p", "inbox-test", inbox_mode=True)
+    finally:
+        _restore("_run_agent_loop", orig)
+    assert handled is True
+    assert "[INBOX_PROCESSED]" in visible
+
+
+def test_inbox_run_is_retried_after_llm_error():
+    orig = _patch("_run_agent_loop", lambda *a, **k: _fake_loop_result(False, "[ERROR] connection refused"))
+    try:
+        handled, _ = daemon_mod.run_agent_loop("p", "inbox-test", inbox_mode=True)
+    finally:
+        _restore("_run_agent_loop", orig)
+    assert handled is False, "a failed run must be retried on the next scan"
+
+
+def test_tick_run_still_reports_no_action():
+    """The autonomous tick keeps the [NO_ACTION] contract (no inbox override)."""
+    orig = _patch("_run_agent_loop", lambda *a, **k: _fake_loop_result(False, "[NO_ACTION] やることはありません"))
+    try:
+        acted, _ = daemon_mod.run_agent_loop("p", "tick-test")
+    finally:
+        _restore("_run_agent_loop", orig)
+    assert acted is False
+
+
 def run_tests():
     global _PASS, _FAIL
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

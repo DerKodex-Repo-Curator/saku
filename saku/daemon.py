@@ -235,6 +235,13 @@ def run_agent_loop(
         return True, result.visible
 
     logger.info("[%s] no-action reply: %s", log_action_name, result.visible[:500])
+
+    if inbox_mode:
+        # An inbox file only needs handling once. The model signals completion with
+        # [INBOX_PROCESSED] whether or not it wrote anything, so "nothing to save"
+        # is a valid outcome; only a failed run (no reply / [ERROR]) is retried.
+        # Without this, such files were re-read on every scan and re-ran the LLM.
+        return bool(result.last_raw) and not result.last_raw.startswith("[ERROR]"), result.visible
     return False, result.visible
 
 # ── Chat: reply ──────────────────────────────────────────
@@ -625,6 +632,8 @@ def check_inbox_and_process() -> None:
 """
             success, _ = run_agent_loop(prompt, f"インボックス処理: {p.name}", inbox_mode=True)
             if success:
+                # success means "handled" for inbox runs, including "nothing to save",
+                # so a no-op file is not re-read and re-sent to the LLM every scan.
                 new_state[rel_inbox_path] = mtime
                 save_processed_state(new_state)
 
