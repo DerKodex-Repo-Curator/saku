@@ -294,3 +294,24 @@ def load_dreaming_config(cfg: dict) -> DreamingConfig:
         min_score=d.get("min_score", 2),
         archive_section=d.get("archive_section", "Archive"),
     )
+
+
+# ── Recall Config (memory prefetch for the light prompt) ──
+# The light prompt omits MEMORY/principles/wiki and relies on SEARCH_NOTES, which
+# the model often skips. A small prefetch keeps continuity without the full prompt.
+@dataclass
+class RecallConfig:
+    enabled: bool = True
+    items: int = 3  # how many memory lines to inject at most
+    max_chars: int = 600  # character budget for the injected block
+    sources: list[str] = field(default_factory=lambda: ["MEMORY.md", "principles/", "wiki/"])
+
+
+def load_recall_config(cfg: dict) -> RecallConfig:
+    r = cfg.get("recall", {})
+    return RecallConfig(
+        enabled=r.get("enabled", True),
+        items=r.get("items", 3),
+        max_chars=r.get("max_chars", 600),
+        sources=list(r.get("sources", ["MEMORY.md", "principles/", "wiki/"])),
+    )
