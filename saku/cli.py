@@ -3,6 +3,7 @@
     saku chat     interactive mode
     saku daemon   background daemon
     saku ui       Web UI
+    saku status   growth summary (read-only)
     saku setup    initialize the memory/vault structure
     saku dream    run a dreaming cycle
     saku mcp      MCP server
@@ -54,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return dream_main(args[1:])
 
-    print("Usage: saku [chat|daemon|ui|setup|dream|mcp]")
+    if cmd == "status":
+        from saku.status import main as status_main
+
+        return status_main(args[1:])
+
+    print("Usage: saku [chat|daemon|ui|status|setup|dream|mcp]")
     return 0
 
 

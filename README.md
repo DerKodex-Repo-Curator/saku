@@ -79,6 +79,7 @@ uv run python -m saku.ui
 uv run python -m saku.cli chat     # terminal chat
 uv run python -m saku.cli daemon   # background daemon only
 uv run python -m saku.cli dream    # run a dreaming cycle manually
+uv run python -m saku.cli status   # growth summary (memory/wiki counts, read-only)
 uv run python -m saku.ui --no-daemon  # Web UI without the autonomous loop
 ```
 
