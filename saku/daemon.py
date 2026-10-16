@@ -344,6 +344,12 @@ Ownerのメッセージ:
         f.write(reply_block)
     print(f"[*] SAKU replied in chat.md")
 
+    # Keep the exchange in the journal. Reflection and dreaming read journal/ and
+    # monologue/ only, so without this the only human feedback SAKU ever gets
+    # (Owner corrections and preferences in chat) never reaches the growth loop.
+    # CLI (core.main) and the Web UI already do this; the daemon did not (#44).
+    agent.save_journal(owner_msg, saku_reply)
+
     state["last_mtime"] = CHAT_FILE.stat().st_mtime
     state["last_content"] = final_content
     state["last_owner_msg_time"] = time.time()

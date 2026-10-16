@@ -143,6 +143,7 @@ def test_owner_message_gets_reply_appended():
         chat.write_text(header, encoding="utf-8")
         state = {"last_mtime": chat.stat().st_mtime, "last_content": header, "turn_count": 0}
         prompts = {}
+        journalled = []
 
         def _fake_loop(prompt, log_action_name, extra_history=None, **kw):
             prompts["prompt"] = prompt
@@ -157,6 +158,7 @@ def test_owner_message_gets_reply_appended():
             "get_pending_requests": daemon_mod.get_pending_requests,
             "check_chat_archive_if_needed": daemon_mod.check_chat_archive_if_needed,
             "build_recall_message": daemon_mod.agent.build_recall_message,
+            "save_journal": daemon_mod.agent.save_journal,
         }
         daemon_mod.CHAT_FILE = chat
         daemon_mod.load_chat_state = lambda: state
@@ -165,6 +167,7 @@ def test_owner_message_gets_reply_appended():
         daemon_mod.get_pending_requests = lambda: ""
         daemon_mod.check_chat_archive_if_needed = lambda s: None
         daemon_mod.agent.build_recall_message = lambda msg: None
+        daemon_mod.agent.save_journal = lambda owner, reply, thinking="": journalled.append((owner, reply))
         try:
             chat.write_text(header + "\n\n今日はどう？ >\n", encoding="utf-8")
             daemon_mod.check_chat_and_reply()
@@ -176,6 +179,7 @@ def test_owner_message_gets_reply_appended():
             daemon_mod.get_pending_requests = originals["get_pending_requests"]
             daemon_mod.check_chat_archive_if_needed = originals["check_chat_archive_if_needed"]
             daemon_mod.agent.build_recall_message = originals["build_recall_message"]
+            daemon_mod.agent.save_journal = originals["save_journal"]
 
         text = chat.read_text(encoding="utf-8")
         assert "**Owner**" in text, "Owner block was not formatted into chat.md"
@@ -184,6 +188,55 @@ def test_owner_message_gets_reply_appended():
         assert prompts.get("prompt", "").find("今日はどう？") >= 0
         assert prompts.get("light") is True, "chat replies must use the light prompt"
         assert state["turn_count"] == 1
+        # #44: the exchange must reach the journal, which reflection/dreaming read
+        assert journalled == [("今日はどう？", "おかえりなさい。")], journalled
+
+
+def test_chat_reply_is_guarded_before_posting():
+    """A repetition loop must never be posted to chat.md (issues #41 / #44)."""
+    import tempfile
+
+    repeated = "\n\n".join(["print('A2A構造化委譲の設計案を検討します')  # 同じ行が繰り返される"] * 4)
+    with tempfile.TemporaryDirectory() as tmp:
+        chat = Path(tmp) / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        chat.write_text(header, encoding="utf-8")
+        state = {"last_mtime": chat.stat().st_mtime, "last_content": header, "turn_count": 0}
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "load_chat_state": daemon_mod.load_chat_state,
+            "save_chat_state": daemon_mod.save_chat_state,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+            "get_pending_requests": daemon_mod.get_pending_requests,
+            "check_chat_archive_if_needed": daemon_mod.check_chat_archive_if_needed,
+            "build_recall_message": daemon_mod.agent.build_recall_message,
+            "save_journal": daemon_mod.agent.save_journal,
+        }
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.load_chat_state = lambda: state
+        daemon_mod.save_chat_state = lambda s: None
+        daemon_mod.run_agent_loop = lambda *a, **k: (True, repeated)
+        daemon_mod.get_pending_requests = lambda: ""
+        daemon_mod.check_chat_archive_if_needed = lambda s: None
+        daemon_mod.agent.build_recall_message = lambda msg: None
+        daemon_mod.agent.save_journal = lambda owner, reply, thinking="": None
+        try:
+            chat.write_text(header + "\n\nこれはどう？ >\n", encoding="utf-8")
+            daemon_mod.check_chat_and_reply()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.load_chat_state = originals["load_chat_state"]
+            daemon_mod.save_chat_state = originals["save_chat_state"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+            daemon_mod.get_pending_requests = originals["get_pending_requests"]
+            daemon_mod.check_chat_archive_if_needed = originals["check_chat_archive_if_needed"]
+            daemon_mod.agent.build_recall_message = originals["build_recall_message"]
+            daemon_mod.agent.save_journal = originals["save_journal"]
+
+        text = chat.read_text(encoding="utf-8")
+        assert text.count("A2A構造化委譲") == 1, "the repetition reached chat.md"
+        assert "出力が退化したため圧縮" in text, text
+
 
 
 def test_owner_message_without_trigger_is_ignored():
