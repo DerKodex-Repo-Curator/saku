@@ -29,14 +29,23 @@ def _blocks(text: str) -> list[str]:
     return [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
 
 
-def find_repetition(text: str, min_unit_chars: int, max_repeat: int) -> tuple[str, int]:
+def find_repetition(
+    text: str, min_unit_chars: int, max_repeat: int, min_line_repeats: int | None = None
+) -> tuple[str, int]:
     """Return (unit, occurrences) for the most repeated unit, or ("", 0).
 
     Two shapes are detected: a run of identical lines (a loop emitting one line
-    over and over) and a block repeated the configured number of times. Units
+    over and over) and a block repeated the configured number of times. Blocks
     shorter than ``min_unit_chars`` are ignored so that ordinary short repeats
     ("- ", "OK") do not trigger the guard.
+
+    Line runs are judged by count instead (#50): a loop that emits "了解しました"
+    thirty times is degenerate even though each line is only six characters. Such
+    a run needs ``min_line_repeats`` consecutive identical lines; longer lines
+    still trip the guard at ``max_repeat``.
     """
+    if min_line_repeats is None:
+        min_line_repeats = max_repeat
     previous, run = "", 0
     lines = text.split("\n")
     for index, line in enumerate(lines):
@@ -46,7 +55,8 @@ def find_repetition(text: str, min_unit_chars: int, max_repeat: int) -> tuple[st
             continue
         run = run + 1 if stripped == previous else 1
         previous = stripped
-        if run >= max_repeat and len(stripped) >= min_unit_chars:
+        long_enough = len(stripped) >= min_unit_chars
+        if (run >= max_repeat and long_enough) or run >= min_line_repeats:
             # Count the whole run so the note reports the real repetition count.
             next_index = index + 1
             while next_index < len(lines) and lines[next_index].strip() == stripped:
@@ -76,7 +86,7 @@ def normalize(text: str, cfg: "saku_config.GuardConfig | None" = None) -> GuardR
         return GuardResult(text)
 
     reasons: list[str] = []
-    unit, count = find_repetition(text, cfg.min_unit_chars, cfg.max_repeat)
+    unit, count = find_repetition(text, cfg.min_unit_chars, cfg.max_repeat, cfg.min_line_repeats)
     if unit:
         cut = text.find(unit) + len(unit)
         text = text[:cut].rstrip()
