@@ -82,6 +82,30 @@ def test_short_units_do_not_trigger_the_guard():
     assert guard.normalize(bullets, _CFG).reason == ""
 
 
+def test_consecutive_short_lines_are_compressed():
+    """#50: 30 identical short lines are degenerate output, not content."""
+    text = "\n".join(["了解しました"] * 30)
+    result = guard.normalize(text, _CFG)
+    assert result.reason, "a short-line loop was not detected"
+    assert result.text.count("了解しました") == 1, result.text
+    assert "同一ブロック×30" in result.text, result.text
+
+
+def test_short_line_threshold_is_configurable():
+    text = "\n".join(["はい"] * 3)
+    assert guard.normalize(text, _CFG).reason == "", "3 short lines must stay below the default"
+    cfg = saku_config.GuardConfig(min_line_repeats=3)
+    assert guard.normalize(text, cfg).reason, "min_line_repeats=3 must detect 3 lines"
+
+
+def test_short_distinct_lines_are_kept():
+    """A normal list must never be mistaken for a loop."""
+    text = "\n".join(f"- 項目{i}: 説明{i}" for i in range(10))
+    result = guard.normalize(text, _CFG)
+    assert result.reason == "", result.reason
+    assert result.text == text
+
+
 def test_oversized_output_is_capped():
     text = "あ" * (_CFG.max_chars + 500)
     result = guard.normalize(text, _CFG)

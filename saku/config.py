@@ -352,6 +352,7 @@ class GuardConfig:
     enabled: bool = True
     max_repeat: int = 3  # same block/line this many times => degenerated
     min_unit_chars: int = 40  # ignore short units ("ok", "-") to avoid false positives
+    min_line_repeats: int = 4  # consecutive identical lines needed to flag short-line loops (#50)
     max_chars: int = 4000  # hard cap on a single record, in characters
 
 
@@ -361,6 +362,7 @@ def load_guard_config(cfg: dict) -> GuardConfig:
         enabled=g.get("enabled", True),
         max_repeat=g.get("max_repeat", 3),
         min_unit_chars=g.get("min_unit_chars", 40),
+        min_line_repeats=g.get("min_line_repeats", 4),
         max_chars=g.get("max_chars", 4000),
     )
 
