@@ -25,6 +25,7 @@ from pathlib import Path
 from saku import core as agent
 from saku import dreaming
 from saku import reflection
+from saku import weekly
 from saku.agent_loop import run_agent_loop as _run_agent_loop
 
 # ── Config (from config.toml via core) ───────────────────────
@@ -512,6 +513,58 @@ def check_and_run_midnight_reflection(now: datetime | None = None) -> None:
     except Exception as e:
         print(f"[!] Midnight reflection failed: {e}")
 
+# ── Weekly review (growth: trends across days) ─────────────
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def check_and_run_weekly_review(now: datetime | None = None) -> None:
+    """Run the weekly trend review once a week (default: Sunday, after 03:00).
+
+    The midnight reflection and dreaming look at a single day. Nothing looked
+    across days, so the same insight was re-derived and the same report was
+    posted twice within hours (issue #43). Weekday, hour, period, destination and
+    whether to report are all configurable via [growth]; ``now`` is injectable
+    for tests.
+    """
+    now = now or datetime.now()
+    gcfg = agent.saku_config.load_growth_config(agent._cfg)
+    if not gcfg.weekly_review_enabled:
+        return
+    if WEEKDAYS[now.weekday()] != gcfg.weekly_review_weekday.lower()[:3]:
+        return
+    if now.hour < gcfg.weekly_review_hour:
+        return
+
+    state = load_chat_state()
+    today_str = now.strftime("%Y-%m-%d")
+    if state.get("last_weekly_review_date", "") == today_str:
+        return
+
+    print(f"[*] Weekly review triggered at {now.strftime('%Y-%m-%d %H:%M')}...")
+    try:
+        result = weekly.run_weekly_review(now)
+    except Exception as e:
+        print(f"[!] Weekly review failed: {e}")
+        return
+
+    # Record the run even when nothing was written, so a quiet week does not make
+    # every later pass that day retry and re-report.
+    state["last_weekly_review_date"] = today_str
+    save_chat_state(state)
+
+    if not gcfg.weekly_review_report:
+        return
+
+    # Report only what actually happened (same rule as issue #39).
+    if result.get("written"):
+        summary = f"週次レビュー（{result['week']}）を {result['target_path']} にまとめました。"
+    elif result.get("reason") == "no records":
+        summary = "対象期間に記録が無かったため、週次レビューの出力はありませんでした。"
+    else:
+        summary = "週次レビューを実行しましたが、ノートの出力はありませんでした。"
+    saku_self_initiate(f"週次レビュー報告 ({summary})")
+
+
 # ── Dreaming: promote durable memories into MEMORY.md ─────────
 def check_and_run_dreaming() -> None:
     """Run dreaming once per day (digests YESTERDAY's journal/monologue)."""
@@ -769,6 +822,7 @@ def _daemon_run():
         save_chat_state(state)
     check_and_run_midnight_reflection()
     check_and_run_dreaming()
+    check_and_run_weekly_review()
     check_scheduled_tasks()
     last_schedule_check = now_ts
 
@@ -789,7 +843,10 @@ def _daemon_run():
             # 3b. Dreaming: promote durable memories into MEMORY.md (once per day)
             check_and_run_dreaming()
 
-            # 3c. Scheduled tasks (chat-driven, every 60s)
+            # 3c. Weekly review: trends across days (once per week)
+            check_and_run_weekly_review()
+
+            # 3d. Scheduled tasks (chat-driven, every 60s)
             if now - last_schedule_check >= 60:
                 check_scheduled_tasks()
                 last_schedule_check = now

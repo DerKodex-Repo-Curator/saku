@@ -123,6 +123,19 @@ auto_initiate_cooldown_seconds = 28800 # SAKU self-initiates every 8 hours
 # max_chars = 600          # 注入ブロックの最大文字数
 # sources = ["MEMORY.md", "principles/", "wiki/"]  # 想起元（メモリルート相対）
 
+# [growth] - 週次レビュー（複数日をまたいだ傾向の整理 / #45）
+# 日次の振り返りは1日単位なので、同じ気づきと報告が反復します（#43）。週に1回、
+# 直近 N 日をまとめて俯瞰し、繰り返している失敗・意図の進捗・統合候補・次週の意図を
+# 1つのノートにまとめます。
+# [growth]
+# weekly_review_enabled = true            # 週次レビューを有効にする
+# weekly_review_weekday = "sun"           # 実行する曜日（mon/tue/wed/thu/fri/sat/sun）
+# weekly_review_hour = 3                  # この時刻以降に実行
+# weekly_review_days = 7                  # 遡る日数
+# weekly_review_path = "principles/weekly-{week}.md"  # 出力先（{week} = ISO週）
+# weekly_review_max_chars = 12000         # 対象記録に使う文字数の上限
+# weekly_review_report = true             # 結果を Owner チャンネルへ報告する
+
 # [guard] - 出力ガード（退化した出力を記録に残さない / #41）
 # ローカル LLM が反復ループに落ち、同じブロックを何度も出力することがあります。
 # そのまま journal に書くと「モデルの不具合」が記憶として残り、翌日の振り返りが
