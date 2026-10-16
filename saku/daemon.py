@@ -61,6 +61,9 @@ EMPTY_REPLY_FALLBACK = _dcfg.get(
     "empty_reply_fallback", "（うまく返事を作れませんでした。もう一度送ってください）"
 )
 
+# #48: where the raw chat log is kept before chat.md is reset.
+ARCHIVE_DIR = _dcfg.get("archive_dir", "chat/archive")
+
 # ── Logging Setup ─────────────────────────────────────
 def _setup_logging():
     log_dir = LOG_DIR
@@ -680,8 +683,19 @@ def archive_chat() -> None:
         reset_chat_file()
         return
 
+    started_at = time.time()
     today = datetime.now().strftime("%Y-%m-%d")
     now_str = datetime.now().strftime("%H:%M")
+
+    # #48: keep the raw exchange before anything else. The summary below is
+    # LLM-generated and can fail or silently write nothing (a single-bracket tool
+    # call used to do exactly that); the raw log must survive regardless. Before
+    # #44 the conversation was lost entirely at this point.
+    archive_path = _save_raw_chat_archive(content)
+    if archive_path is None:
+        # Never destroy the only copy: leave chat.md alone so the next tick retries.
+        logger.error("[チャットアーカイブ] raw log could not be saved; chat.md left as is")
+        return
 
     meta_update_rule = agent.meta_update_rule()
 
@@ -697,8 +711,35 @@ def archive_chat() -> None:
 
 （注: journal/ への書き込みは制限されています。principles/ や meta.md を使用してください）
 """
-    run_agent_loop(prompt, f"チャットアーカイブ ({now_str})", extra_history=chat_history)
+    ok, visible = run_agent_loop(prompt, f"チャットアーカイブ ({now_str})", extra_history=chat_history)
+
+    # Verify the summary actually landed instead of assuming it did (#48). The raw
+    # log is already safe, so chat.md may be reset either way — but a silent failure
+    # must leave a trace.
+    summary_path = MEMORY_ROOT / "principles" / f"{today}-chat-archive.md"
+    summarized = summary_path.exists() and summary_path.stat().st_mtime >= started_at
+    if not ok or "[ARCHIVE_DONE]" not in visible or not summarized:
+        logger.warning(
+            "[チャットアーカイブ] summary incomplete (summary_file_written=%s, done_marker=%s, reply=%r); "
+            "raw log kept at %s",
+            summarized, "[ARCHIVE_DONE]" in visible, visible[:200], archive_path,
+        )
+
     reset_chat_file()
+
+
+def _save_raw_chat_archive(content: str) -> Path | None:
+    """Write the pre-reset chat.md to the archive dir (#48). Returns None on failure."""
+    try:
+        archive_dir = MEMORY_ROOT / ARCHIVE_DIR
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        path = archive_dir / f"{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.md"
+        path.write_text(content, encoding="utf-8")
+        print(f"[*] raw chat log archived: {path}")
+        return path
+    except Exception as e:
+        logger.error("[チャットアーカイブ] failed to write raw log: %s", e)
+        return None
 
 # ── Inbox: process new files ─────────────────────────────
 def load_processed_state() -> dict:

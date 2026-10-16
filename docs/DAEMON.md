@@ -43,9 +43,12 @@ To keep `chat.md` clean and lightweight, the daemon implements an automated arch
   - Chat exceeds a turn limit (default: **10 turns**).
   - No messages have been sent for a duration (default: **30 minutes**).
 - **Process**:
-  1. The daemon loads the chat history.
+  1. The daemon copies the raw `chat.md` to `<archive_dir>/YYYY-MM-DD-HHMMSS.md` (default `chat/archive`, `[daemon] archive_dir`). This happens first and independently of the model, so the conversation survives even when the summary writes nothing (#48).
   2. SAKU runs an LLM task to summarize the chat, save any new learned rules under `principles/`, and update the `meta.md` self-model under the `## Recent Events` section.
-  3. `chat.md` is reset to its default header template.
+  3. The daemon checks that the summary landed (`principles/YYYY-MM-DD-chat-archive.md` was written, `[ARCHIVE_DONE]` emitted) and logs a warning if it did not.
+  4. `chat.md` is reset to its default header template — but only after the raw copy exists; if that copy could not be written, `chat.md` is left untouched so the next tick retries.
+
+Chat replies that fail to produce any text post `[daemon] empty_reply_fallback` to `chat.md` instead of leaving the Owner with silence (#49).
 
 ---
 

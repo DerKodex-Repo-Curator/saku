@@ -243,6 +243,88 @@ def test_empty_reply_posts_fallback_instead_of_silence():
         assert archived == [], "a failed turn must not trigger archiving"
 
 
+def test_archive_keeps_raw_log_even_when_summary_fails():
+    """#48: the raw exchange must survive the archive, whatever the model does."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        chat = root / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        exchange = header + "\n\n**Owner** (10:00)\n元気？\n\n**SAKU** (10:00)\n元気だよ。\n"
+        chat.write_text(exchange, encoding="utf-8")
+
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "MEMORY_ROOT": daemon_mod.MEMORY_ROOT,
+            "ARCHIVE_DIR": daemon_mod.ARCHIVE_DIR,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+            "reset_chat_file": daemon_mod.reset_chat_file,
+            "meta_update_rule": daemon_mod.agent.meta_update_rule,
+        }
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.MEMORY_ROOT = root
+        daemon_mod.ARCHIVE_DIR = "chat/archive"
+        daemon_mod.reset_chat_file = lambda: chat.write_text(header, encoding="utf-8")
+        daemon_mod.agent.meta_update_rule = lambda: "rule"
+        try:
+            # (a) the model writes nothing at all — the failure mode of #48
+            daemon_mod.run_agent_loop = lambda *a, **k: (False, "")
+            daemon_mod.archive_chat()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.MEMORY_ROOT = originals["MEMORY_ROOT"]
+            daemon_mod.ARCHIVE_DIR = originals["ARCHIVE_DIR"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+            daemon_mod.reset_chat_file = originals["reset_chat_file"]
+            daemon_mod.agent.meta_update_rule = originals["meta_update_rule"]
+
+        archived = sorted((root / "chat/archive").glob("*.md"))
+        assert len(archived) == 1, archived
+        assert "元気だよ" in archived[0].read_text(encoding="utf-8")
+        assert chat.read_text(encoding="utf-8") == header, "chat.md was not reset"
+
+
+def test_archive_does_not_reset_when_the_raw_log_cannot_be_written():
+    """#48: never destroy the only copy of the conversation."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        chat = root / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        exchange = header + "\n\n**Owner** (10:00)\nねえ\n\n**SAKU** (10:00)\nなに？\n"
+        chat.write_text(exchange, encoding="utf-8")
+
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "MEMORY_ROOT": daemon_mod.MEMORY_ROOT,
+            "ARCHIVE_DIR": daemon_mod.ARCHIVE_DIR,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+            "reset_chat_file": daemon_mod.reset_chat_file,
+            "meta_update_rule": daemon_mod.agent.meta_update_rule,
+        }
+        # A file where the archive directory should be makes mkdir/write fail.
+        (root / "chat").write_text("not a directory", encoding="utf-8")
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.MEMORY_ROOT = root
+        daemon_mod.ARCHIVE_DIR = "chat/archive"
+        daemon_mod.reset_chat_file = lambda: chat.write_text(header, encoding="utf-8")
+        daemon_mod.agent.meta_update_rule = lambda: "rule"
+        daemon_mod.run_agent_loop = lambda *a, **k: (True, "[ARCHIVE_DONE]")
+        try:
+            daemon_mod.archive_chat()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.MEMORY_ROOT = originals["MEMORY_ROOT"]
+            daemon_mod.ARCHIVE_DIR = originals["ARCHIVE_DIR"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+            daemon_mod.reset_chat_file = originals["reset_chat_file"]
+            daemon_mod.agent.meta_update_rule = originals["meta_update_rule"]
+
+        assert chat.read_text(encoding="utf-8") == exchange, "chat.md was reset without a backup"
+
+
 def test_chat_reply_is_guarded_before_posting():
     """A repetition loop must never be posted to chat.md (issues #41 / #44)."""
     import tempfile
