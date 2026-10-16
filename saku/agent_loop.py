@@ -12,7 +12,8 @@ Flow:
 6. Exit if there are no tools, otherwise repeat 1-5 up to max_turns
 """
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -21,6 +22,7 @@ from .context import needs_compaction, trim_old_tool_results, truncate_history
 from .llm import chat_stream
 from .thinking import internal_markers_in, split_thinking, strip_tool_blocks
 from .transport import exec_tools, list_tool_calls
+from .verify import unbacked_writes
 
 
 @dataclass
@@ -31,6 +33,8 @@ class LoopResult:
     history: list[dict]  # history after the loop (for the caller to take over)
     action_taken: bool
     turns: int = 0
+    # #52: paths the reply claims it wrote but that the turn never touched.
+    unbacked_claims: list[str] = field(default_factory=list)
 
 
 def run_agent_loop(
@@ -58,6 +62,7 @@ def run_agent_loop(
     frozen. It is optional and silent when not given.
     """
     budget = llm_cfg.working_budget_tokens or DEFAULT_WORKING_BUDGET_TOKENS
+    started_at = time.time()
     work = list(history)
 
     def _status(text: str) -> None:
@@ -170,6 +175,13 @@ def run_agent_loop(
                 work.append({"role": "assistant", "content": clean_final})
                 last_raw = raw_final
 
+    # Verification (#52): a reply that says it wrote a file must be backed by a file the
+    # turn actually touched. Report the mismatch instead of trusting the text — with a
+    # single-bracket tool call the write never happened and the Owner was told it did.
+    unbacked = unbacked_writes(final_visible, memory_root, started_at)
+    if unbacked and log:
+        log(f"reply claims writes that nothing backed: {', '.join(unbacked)}")
+
     return LoopResult(
         visible=final_visible.strip(),
         thinking="\n\n".join(current_thinking).strip(),
@@ -177,4 +189,5 @@ def run_agent_loop(
         history=work,
         action_taken=action_taken,
         turns=turn + 1,
+        unbacked_claims=unbacked,
     )
