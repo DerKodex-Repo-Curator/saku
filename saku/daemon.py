@@ -209,9 +209,19 @@ def _strip_no_action_markers(text: str) -> str:
 
 # ── Agent loop runner ────────────────────────────────────
 def run_agent_loop(
-    prompt: str, log_action_name: str, extra_history: list[dict] = None, light: bool = False, inbox_mode: bool = False
+    prompt: str,
+    log_action_name: str,
+    extra_history: list[dict] = None,
+    light: bool = False,
+    inbox_mode: bool = False,
+    log_action: bool = True,
 ) -> tuple[bool, str]:
-    """Run Saku on a specific prompt, execute tools, and log results. Returns (success, visible_output)."""
+    """Run Saku on a specific prompt, execute tools, and log results. Returns (success, visible_output).
+
+    ``log_action=False`` suppresses the automatic ``save_autonomous_log`` entry. Chat
+    turns set it because ``check_chat_and_reply`` journals the whole exchange itself;
+    without this the same turn was written to the journal twice (#46).
+    """
     if inbox_mode:
         system_prompt = agent.build_inbox_system_prompt()
     elif light:
@@ -248,7 +258,7 @@ def run_agent_loop(
     if acted:
         # A tick can act (write a principle) and still end with [NO_ACTION]: never
         # store a journal entry whose whole content is the marker.
-        if visible:
+        if visible and log_action:
             agent.save_autonomous_log(log_action_name, visible, thinking=result.thinking)
         logger.info("[%s] reply: %s", log_action_name, visible[:500] or "(no text)")
     else:
@@ -325,7 +335,9 @@ Ownerのメッセージ:
 {owner_msg}
 """
 
-    _, saku_reply = run_agent_loop(prompt, "chat返信", extra_history=context_history, light=True)
+    _, saku_reply = run_agent_loop(
+        prompt, "chat返信", extra_history=context_history, light=True, log_action=False
+    )
 
     if not saku_reply:
         state["last_mtime"] = CHAT_FILE.stat().st_mtime
@@ -349,6 +361,8 @@ Ownerのメッセージ:
     # monologue/ only, so without this the only human feedback SAKU ever gets
     # (Owner corrections and preferences in chat) never reaches the growth loop.
     # CLI (core.main) and the Web UI already do this; the daemon did not (#44).
+    # Chat turns must not also write an autonomous log entry, or the same turn is
+    # journalled twice (#46) — hence log_action=False above.
     agent.save_journal(owner_msg, saku_reply)
 
     state["last_mtime"] = CHAT_FILE.stat().st_mtime
