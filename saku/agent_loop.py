@@ -64,7 +64,10 @@ def run_agent_loop(
         if on_status is not None:
             on_status(text)
 
-    current_visible: list[str] = []
+    # #54: what the caller shows is the text of the *last* turn that produced any.
+    # A turn that also calls a tool usually carries only a preamble, and joining every
+    # turn posted the same answer twice ("要点は…" followed by "了解しました。要点は…").
+    final_visible = ""
     current_thinking: list[str] = []
     last_raw = ""
     last_tool_output = ""
@@ -105,7 +108,7 @@ def run_agent_loop(
                 log(f"visible text contained internal prompt fragments: {leaked}")
         clean_visible = strip_tool_blocks(visible)
         if clean_visible:
-            current_visible.append(clean_visible)
+            final_visible = clean_visible
         if thinking:
             current_thinking.append(thinking)
 
@@ -143,7 +146,7 @@ def run_agent_loop(
     # Final-answer rescue: a research-style turn can spend every turn on tools (or the
     # repeat guard halts the loop), leaving the caller with nothing to show. Ask once
     # more, explicitly without tools, and use that as the visible answer.
-    if not current_visible and not last_raw.startswith("[ERROR]"):
+    if not final_visible and not last_raw.startswith("[ERROR]"):
         _status("writing answer")
         rescue_history = list(work) + [
             {
@@ -159,12 +162,12 @@ def run_agent_loop(
             _thinking, visible_final = split_thinking(raw_final)
             clean_final = strip_tool_blocks(visible_final).strip()
             if clean_final:
-                current_visible.append(clean_final)
+                final_visible = clean_final
                 work.append({"role": "assistant", "content": clean_final})
                 last_raw = raw_final
 
     return LoopResult(
-        visible="\n\n".join(current_visible).strip(),
+        visible=final_visible.strip(),
         thinking="\n\n".join(current_thinking).strip(),
         last_raw=last_raw,
         history=work,
