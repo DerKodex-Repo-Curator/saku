@@ -389,6 +389,90 @@ def test_reflection_report_mentions_meta_when_it_was_updated():
     assert "meta.md" in report and "整理を完了しました" in report, report
 
 
+def test_chat_turn_is_journalled_once():
+    """Issue #46: a chat turn must not be written to the journal twice.
+
+    run_agent_loop writes an autonomous log entry when it acted; the chat path
+    also calls save_journal. Chat therefore passes log_action=False and must not
+    produce the ``[chat返信]`` entry.
+    """
+    from saku.agent_loop import LoopResult
+
+    saved = []
+    originals = {
+        "_run_agent_loop": daemon_mod._run_agent_loop,
+        "save_autonomous_log": daemon_mod.agent.save_autonomous_log,
+        "build_light_system_prompt": daemon_mod.agent.build_light_system_prompt,
+        "build_system_prompt": daemon_mod.agent.build_system_prompt,
+    }
+    daemon_mod.agent.build_light_system_prompt = lambda: "light"
+    daemon_mod.agent.build_system_prompt = lambda: "full"
+    daemon_mod.agent.save_autonomous_log = lambda name, reply, thinking="": saved.append((name, reply))
+    daemon_mod._run_agent_loop = lambda *a, **kw: LoopResult(
+        visible="返信です。", thinking="", last_raw="返信です。", history=[], action_taken=True
+    )
+    try:
+        daemon_mod.run_agent_loop("prompt", "chat返信", light=True, log_action=False)
+        assert saved == [], f"chat turn wrote an autonomous log entry: {saved}"
+        # Other paths (ticks, inbox) still log their autonomous action
+        daemon_mod.run_agent_loop("prompt", "定期自律アクション", light=True)
+        assert saved == [("定期自律アクション", "返信です。")], saved
+    finally:
+        daemon_mod._run_agent_loop = originals["_run_agent_loop"]
+        daemon_mod.agent.save_autonomous_log = originals["save_autonomous_log"]
+        daemon_mod.agent.build_light_system_prompt = originals["build_light_system_prompt"]
+        daemon_mod.agent.build_system_prompt = originals["build_system_prompt"]
+
+
+def test_chat_reply_uses_log_action_false():
+    """Issue #46: check_chat_and_reply must suppress the autonomous log entry."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        chat = Path(tmp) / "chat.md"
+        header = daemon_mod.CHAT_RESET_HEADER
+        chat.write_text(header, encoding="utf-8")
+        state = {"last_mtime": chat.stat().st_mtime, "last_content": header, "turn_count": 0}
+        seen = {}
+
+        def _fake_loop(prompt, log_action_name, extra_history=None, **kw):
+            seen.update(kw)
+            return True, "返信です。"
+
+        originals = {
+            "CHAT_FILE": daemon_mod.CHAT_FILE,
+            "load_chat_state": daemon_mod.load_chat_state,
+            "save_chat_state": daemon_mod.save_chat_state,
+            "run_agent_loop": daemon_mod.run_agent_loop,
+            "get_pending_requests": daemon_mod.get_pending_requests,
+            "check_chat_archive_if_needed": daemon_mod.check_chat_archive_if_needed,
+            "build_recall_message": daemon_mod.agent.build_recall_message,
+            "save_journal": daemon_mod.agent.save_journal,
+        }
+        daemon_mod.CHAT_FILE = chat
+        daemon_mod.load_chat_state = lambda: state
+        daemon_mod.save_chat_state = lambda s: None
+        daemon_mod.run_agent_loop = _fake_loop
+        daemon_mod.get_pending_requests = lambda: ""
+        daemon_mod.check_chat_archive_if_needed = lambda s: None
+        daemon_mod.agent.build_recall_message = lambda msg: None
+        daemon_mod.agent.save_journal = lambda owner, reply, thinking="": None
+        try:
+            chat.write_text(header + "\n\n今日はどう？ >\n", encoding="utf-8")
+            daemon_mod.check_chat_and_reply()
+        finally:
+            daemon_mod.CHAT_FILE = originals["CHAT_FILE"]
+            daemon_mod.load_chat_state = originals["load_chat_state"]
+            daemon_mod.save_chat_state = originals["save_chat_state"]
+            daemon_mod.run_agent_loop = originals["run_agent_loop"]
+            daemon_mod.get_pending_requests = originals["get_pending_requests"]
+            daemon_mod.check_chat_archive_if_needed = originals["check_chat_archive_if_needed"]
+            daemon_mod.agent.build_recall_message = originals["build_recall_message"]
+            daemon_mod.agent.save_journal = originals["save_journal"]
+
+        assert seen.get("log_action") is False, seen
+
+
 def run_tests():
     global _PASS, _FAIL
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
