@@ -314,6 +314,35 @@ def load_dreaming_config(cfg: dict) -> DreamingConfig:
     )
 
 
+# ── Growth Config (weekly trend review) ─────────────────
+# The daily reflection digests a single day. Nothing looked across days, so the
+# same insight was re-derived and the same report posted twice within hours
+# (issue #43). The weekly pass reads the last N days at once and asks for trends,
+# intention progress, notes to consolidate, and intentions for the coming week.
+@dataclass
+class GrowthConfig:
+    weekly_review_enabled: bool = True
+    weekly_review_weekday: str = "sun"  # mon / tue / ... / sun
+    weekly_review_hour: int = 3  # local hour after which it may run
+    weekly_review_days: int = 7  # how many days back to digest
+    weekly_review_path: str = "principles/weekly-{week}.md"  # {week} = ISO week
+    weekly_review_max_chars: int = 12000  # context budget for the raw records
+    weekly_review_report: bool = True  # post a short report to the Owner channel
+
+
+def load_growth_config(cfg: dict) -> GrowthConfig:
+    g = cfg.get("growth", {})
+    return GrowthConfig(
+        weekly_review_enabled=g.get("weekly_review_enabled", True),
+        weekly_review_weekday=g.get("weekly_review_weekday", "sun"),
+        weekly_review_hour=g.get("weekly_review_hour", 3),
+        weekly_review_days=g.get("weekly_review_days", 7),
+        weekly_review_path=g.get("weekly_review_path", "principles/weekly-{week}.md"),
+        weekly_review_max_chars=g.get("weekly_review_max_chars", 12000),
+        weekly_review_report=g.get("weekly_review_report", True),
+    )
+
+
 # ── Output Guard Config (degenerate LLM output) ─────────
 # A local LLM can fall into a repetition loop (the same block emitted many times)
 # or produce an oversized dump. Such output is not memory: it must not reach the
