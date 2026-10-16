@@ -55,6 +55,12 @@ ARCHIVE_AFTER_TURNS = _dcfg.get("archive_after_turns", 10)
 AUTO_INITIATE_COOLDOWN_SECONDS = _dcfg.get("auto_initiate_cooldown_seconds", 28800)
 INITIATE_RETRY_SECONDS = _dcfg.get("initiate_retry_seconds", 1800)  # Retry interval after failures (prevents spam)
 
+# #49: when the model produces no visible text, the Owner used to get nothing at
+# all — indistinguishable from a broken bot. Post a short note instead.
+EMPTY_REPLY_FALLBACK = _dcfg.get(
+    "empty_reply_fallback", "（うまく返事を作れませんでした。もう一度送ってください）"
+)
+
 # ── Logging Setup ─────────────────────────────────────
 def _setup_logging():
     log_dir = LOG_DIR
@@ -340,16 +346,19 @@ Ownerのメッセージ:
     )
 
     if not saku_reply:
-        state["last_mtime"] = CHAT_FILE.stat().st_mtime
-        state["last_content"] = updated_content
-        save_chat_state(state)
-        return
-
-    # Never post a repetition loop to the Owner: compress it first (issue #41).
-    saku_reply = agent.normalize_reply(saku_reply)
+        # #49: silence reads as "the bot is broken". Post a short note instead of
+        # swallowing the message. The turn is not journalled (there is nothing for
+        # reflection to learn from) and does not count toward archiving.
+        logger.warning("[chat返信] empty reply: posting fallback text")
+        reply_ok = False
+        saku_reply = EMPTY_REPLY_FALLBACK
+    else:
+        reply_ok = True
+        # Never post a repetition loop to the Owner: compress it first (issue #41).
+        saku_reply = agent.normalize_reply(saku_reply)
 
     # Check request list and append if any pending
-    request_suffix = get_pending_requests()
+    request_suffix = get_pending_requests() if reply_ok else ""
     reply_block = f"\n**SAKU** ({now_str})\n{saku_reply}{request_suffix}\n"
     final_content = updated_content + reply_block
 
@@ -363,16 +372,19 @@ Ownerのメッセージ:
     # CLI (core.main) and the Web UI already do this; the daemon did not (#44).
     # Chat turns must not also write an autonomous log entry, or the same turn is
     # journalled twice (#46) — hence log_action=False above.
-    agent.save_journal(owner_msg, saku_reply)
+    if reply_ok:
+        agent.save_journal(owner_msg, saku_reply)
 
     state["last_mtime"] = CHAT_FILE.stat().st_mtime
     state["last_content"] = final_content
     state["last_owner_msg_time"] = time.time()
     state["last_saku_msg_time"] = time.time()
-    state["turn_count"] = state.get("turn_count", 0) + 1
+    if reply_ok:
+        state["turn_count"] = state.get("turn_count", 0) + 1
     save_chat_state(state)
 
-    check_chat_archive_if_needed(state)
+    if reply_ok:
+        check_chat_archive_if_needed(state)
 
 # ── Chat: SAKU Self-Initiated message ──────────────────────
 def check_autonomous_initiation() -> None:
