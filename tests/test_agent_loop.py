@@ -211,6 +211,75 @@ def test_run_agent_loop_with_tool_then_answer():
         assert result.turns == 2
 
 
+def test_visible_text_is_not_concatenated_across_turns():
+    """#54: only the last turn's text is shown — never every turn joined.
+
+    The real failure: turn 1 answered with a numbered list *and* called a tool, turn 2
+    restated the same answer, and chat.md got both ("要点は…" twice).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "tools").mkdir()
+        (root / "tools" / "echo.py").write_text(
+            "def run(base, path, body='', **kw):\n    return 'echo:' + body\n",
+            encoding="utf-8",
+        )
+
+        def fake_chat_stream(history, llm_cfg, on_token=None):
+            has_result = any(
+                m.get("role") == "user" and "[system] tool results:" in str(m.get("content", ""))
+                for m in history
+            )
+            if has_result:
+                return "最終回答です。"
+            return "（前置き）まず調べます。\n\n[[ECHO]]\nhi\n[[END]]"
+
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = fake_chat_stream
+        try:
+            result = agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+        assert result.visible == "最終回答です。", result.visible
+        assert "前置き" not in result.visible
+
+
+def test_visible_text_survives_a_final_empty_turn():
+    """#54: if the closing turn says nothing, the previous turn's answer is kept."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "tools").mkdir()
+        (root / "tools" / "echo.py").write_text(
+            "def run(base, path, body='', **kw):\n    return 'echo:' + body\n",
+            encoding="utf-8",
+        )
+
+        def fake_chat_stream(history, llm_cfg, on_token=None):
+            has_result = any(
+                m.get("role") == "user" and "[system] tool results:" in str(m.get("content", ""))
+                for m in history
+            )
+            return "" if has_result else "調べた結果の回答です。\n\n[[ECHO]]\nhi\n[[END]]"
+
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = fake_chat_stream
+        try:
+            result = agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+        assert result.visible == "調べた結果の回答です。", result.visible
+
+
 def test_run_agent_loop_no_action_marker():
     def fake_chat_stream(history, llm_cfg, on_token=None):
         return "[NO_ACTION]"
