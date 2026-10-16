@@ -10,6 +10,7 @@ The LLM endpoint is configured in config.toml ([llm] / [llm.profiles.*]) and can
 point to a local server (llama-server, LiteLLM, ...) or a cloud OpenAI-compatible API.
 """
 
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from saku import config as saku_config
+from saku import guard as output_guard
 from saku.agent_loop import run_agent_loop as _run_agent_loop
 from saku.llm import STOP_TOKENS, chat_stream as _llm_chat_stream
 from saku.thinking import split_thinking as _split_thinking
@@ -31,6 +33,9 @@ from saku.transport import exec_tools as _exec_tools
 _cfg, _config_base = saku_config.load_config()
 
 context_config = saku_config.load_context_config(_cfg)
+guard_config = saku_config.load_guard_config(_cfg)
+
+logger = logging.getLogger(__name__)
 
 # Resolve memory root path (can be relative to config base or absolute)
 MEMORY_ROOT = saku_config.resolve_memory_root(_cfg, _config_base)
@@ -636,8 +641,22 @@ def chat_stream(messages: list[dict]) -> str:
 
 
 # ── Journal ─────────────────────────────────────────────
+def normalize_reply(text: str) -> str:
+    """Compress degenerate LLM output before it becomes a record (issue #41).
+
+    Returns the recordable text (unchanged when the output was clean) and logs a
+    warning when the guard fired, so a repetition loop leaves a trace in
+    state/saku.log instead of silently becoming "memory".
+    """
+    result = output_guard.normalize(text, guard_config)
+    if result.reason:
+        logger.warning("degenerate output compressed: %s", result.reason)
+    return result.text
+
+
 def save_journal(user_input: str, reply: str, thinking: str = "") -> None:
     """Append a turn to today's journal file in Obsidian."""
+    reply = normalize_reply(reply)
     journal_dir = SAKU_ROOT / "journal"
     journal_dir.mkdir(parents=True, exist_ok=True)
 
@@ -658,6 +677,7 @@ def save_journal(user_input: str, reply: str, thinking: str = "") -> None:
 
 def save_autonomous_log(action_name: str, reply: str, thinking: str = "") -> None:
     """Append an autonomous action log to today's journal file in Obsidian."""
+    reply = normalize_reply(reply)
     journal_dir = SAKU_ROOT / "journal"
     journal_dir.mkdir(parents=True, exist_ok=True)
 

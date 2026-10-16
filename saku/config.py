@@ -314,6 +314,28 @@ def load_dreaming_config(cfg: dict) -> DreamingConfig:
     )
 
 
+# ── Output Guard Config (degenerate LLM output) ─────────
+# A local LLM can fall into a repetition loop (the same block emitted many times)
+# or produce an oversized dump. Such output is not memory: it must not reach the
+# journal verbatim (issue #41). Thresholds are configurable (no hardcoding).
+@dataclass
+class GuardConfig:
+    enabled: bool = True
+    max_repeat: int = 3  # same block/line this many times => degenerated
+    min_unit_chars: int = 40  # ignore short units ("ok", "-") to avoid false positives
+    max_chars: int = 4000  # hard cap on a single record, in characters
+
+
+def load_guard_config(cfg: dict) -> GuardConfig:
+    g = cfg.get("guard", {})
+    return GuardConfig(
+        enabled=g.get("enabled", True),
+        max_repeat=g.get("max_repeat", 3),
+        min_unit_chars=g.get("min_unit_chars", 40),
+        max_chars=g.get("max_chars", 4000),
+    )
+
+
 # ── Recall Config (memory prefetch for the light prompt) ──
 # The light prompt omits MEMORY/principles/wiki and relies on SEARCH_NOTES, which
 # the model often skips. A small prefetch keeps continuity without the full prompt.
