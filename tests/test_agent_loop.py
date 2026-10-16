@@ -117,6 +117,45 @@ def test_single_bracket_call_stripped_from_visible_text():
     assert thinking.strip_tool_blocks('[[READ_FILE path="x.md"]]\n[[END]]\nこんにちは') == "こんにちは"
 
 
+def test_internal_prompt_fragments_are_stripped():
+    """#51: echoed prompt scaffolding must not reach chat.md / the journal."""
+    leak = (
+        "[system] chat.md上の会話履歴（直前）:\n"
+        "- 16:50: 「アーカイブ後のチャットです」 → 16:51に回答済み。\n\n"
+        "[system] 関連する記憶（自動想起）:\n"
+        "- principles/2026-06-18-web-research.md: 2. Value of context-aware adaptation\n"
+        "\n"
+        "本文としての答えです。"
+    )
+    out = thinking.strip_tool_blocks(leak)
+    assert out == "本文としての答えです。", out
+
+
+def test_narration_line_is_stripped():
+    leak = (
+        "Ownerのメッセージは「A2A」について検索して要点だけ教えてという指示です。\n"
+        "要点は次のとおりです。"
+    )
+    out = thinking.strip_tool_blocks(leak)
+    assert "指示です" not in out, out
+    assert "要点は次のとおりです。" in out, out
+
+
+def test_recall_block_is_stripped_but_normal_text_survives():
+    recall = (
+        "# 関連する記憶（自動想起）\n"
+        "- (MEMORY.md) 2026-10-15: 何かの記録\n"
+        "\n"
+        "必要なら `SEARCH_NOTES` で更に掘り、想起した内容に基づいて答えてください。\n"
+    )
+    assert thinking.strip_tool_blocks(recall) == ""
+
+
+def test_internal_markers_are_reported():
+    assert thinking.internal_markers_in("[system] 何か") != []
+    assert thinking.internal_markers_in("普通の返事です。") == []
+
+
 def test_run_agent_loop_no_tools():
     calls = {"n": 0}
 
