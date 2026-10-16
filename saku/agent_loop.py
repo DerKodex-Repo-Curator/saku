@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from .config import ContextConfig, DEFAULT_WORKING_BUDGET_TOKENS, LlmConfig
 from .context import needs_compaction, trim_old_tool_results, truncate_history
 from .llm import chat_stream
-from .thinking import split_thinking, strip_tool_blocks
+from .thinking import internal_markers_in, split_thinking, strip_tool_blocks
 from .transport import exec_tools, list_tool_calls
 
 
@@ -98,6 +98,11 @@ def run_agent_loop(
             action_taken = True
 
         thinking, visible = split_thinking(raw_reply)
+        # #51: warn (without failing the turn) when the reply echoes prompt scaffolding.
+        if log:
+            leaked = internal_markers_in(visible)
+            if leaked:
+                log(f"visible text contained internal prompt fragments: {leaked}")
         clean_visible = strip_tool_blocks(visible)
         if clean_visible:
             current_visible.append(clean_visible)
