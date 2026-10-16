@@ -80,10 +80,14 @@ def run_agent_loop(
 
         # 2. Compact history if the working budget is exceeded
         if needs_compaction(work, budget, ctx):
-            _status("compacting context")
             work, dropped = truncate_history(work, ctx.keep_recent_tokens)
-            if log:
-                log(f"context compacted: dropped {dropped} chars, history={len(work)} msgs")
+            # Announce only a compaction that actually removed something. keep_recent_tokens
+            # can be larger than the budget, in which case this is a no-op — logging
+            # "compacted: dropped 0 chars" on every turn of a chat was pure noise.
+            if dropped:
+                _status("compacting context")
+                if log:
+                    log(f"context compacted: dropped {dropped} chars, history={len(work)} msgs")
 
         # 3. LLM call
         _status("thinking")

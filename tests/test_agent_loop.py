@@ -280,6 +280,43 @@ def test_visible_text_survives_a_final_empty_turn():
         assert result.visible == "調べた結果の回答です。", result.visible
 
 
+def test_compaction_is_not_announced_when_nothing_is_dropped():
+    """A no-op compaction must stay quiet: it used to warn on every chat turn."""
+    logged: list[str] = []
+    ctx = ContextConfig(compaction_trigger=0.7, keep_recent_tokens=10_000,
+                        prune_tool_results=False, max_tool_result_chars=2000)
+    llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100)
+    history = [{"role": "system", "content": "sys"}] + [
+        {"role": "user", "content": "x" * 400} for _ in range(3)
+    ]
+    original = agent_loop.chat_stream
+    agent_loop.chat_stream = lambda h, c, on_token=None: "回答"
+    try:
+        agent_loop.run_agent_loop(history, llm, ctx, Path("/tmp"), Path("/tmp"), log=logged.append)
+    finally:
+        agent_loop.chat_stream = original
+
+    assert not [m for m in logged if "compacted" in m], logged
+
+
+def test_compaction_is_announced_when_history_is_dropped():
+    logged: list[str] = []
+    ctx = ContextConfig(compaction_trigger=0.7, keep_recent_tokens=50,
+                        prune_tool_results=False, max_tool_result_chars=2000)
+    llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100)
+    history = [{"role": "system", "content": "sys"}] + [
+        {"role": "user", "content": "あ" * 200} for _ in range(3)
+    ]
+    original = agent_loop.chat_stream
+    agent_loop.chat_stream = lambda h, c, on_token=None: "回答"
+    try:
+        agent_loop.run_agent_loop(history, llm, ctx, Path("/tmp"), Path("/tmp"), log=logged.append)
+    finally:
+        agent_loop.chat_stream = original
+
+    assert [m for m in logged if "compacted" in m], logged
+
+
 def test_run_agent_loop_no_action_marker():
     def fake_chat_stream(history, llm_cfg, on_token=None):
         return "[NO_ACTION]"
