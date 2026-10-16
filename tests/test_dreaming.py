@@ -43,6 +43,25 @@ def test_append_items_creates_and_dedupes():
         assert added2 == []
 
 
+def test_leading_date_is_not_duplicated():
+    """#53: a promoted text that repeats the entry's own date must be cleaned."""
+    assert dreaming.strip_leading_date("2026-10-15: 東京ゲームショウの観察", "2026-10-15") == "東京ゲームショウの観察"
+    assert dreaming.strip_leading_date("2026-10-15 何かの記録", "2026-10-15") == "何かの記録"
+    # a different date carries information and stays
+    assert dreaming.strip_leading_date("2026-10-14: 出張の記録", "2026-10-15") == "2026-10-14: 出張の記録"
+    assert dreaming.strip_leading_date("日付の無い内容", "2026-10-15") == "日付の無い内容"
+
+
+def test_append_items_does_not_duplicate_the_date():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "MEMORY.md"
+        added = dreaming.append_items(path, [("重要な学び", "2026-10-15: 学んだこと")], "2026-10-15")
+        assert added == ["学んだこと"], added
+        content = path.read_text(encoding="utf-8")
+        assert "- 2026-10-15: 学んだこと" in content
+        assert "2026-10-15: 2026-10-15" not in content
+
+
 def test_parse_memory_items():
     raw = """前書きの雑談。
 
