@@ -89,6 +89,22 @@ def format_entry(date: str, text: str, score: int, last: str | None = None) -> s
     return f"- {date}: {text} <!-- s:{score} last:{last or date} -->"
 
 
+# #53: the extraction model often copies the journal heading, so the promoted text
+# already starts with a date and the entry ends up "- 2026-10-15: 2026-10-15: ...".
+_LEADING_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}):?\s+")
+
+
+def strip_leading_date(text: str, date: str) -> str:
+    """Drop a leading date that merely repeats the entry's own date (#53).
+
+    A *different* date is kept: it is information about when something happened.
+    """
+    m = _LEADING_DATE_RE.match(text)
+    if m and m.group(1) == date:
+        return text[m.end():].strip()
+    return text
+
+
 def parse_entry(line: str) -> dict | None:
     """Parse an entry line. Returns None if the line is not an entry.
 
@@ -215,7 +231,7 @@ def extract_items(target_date: str, journal: str, monologue: str) -> list[tuple[
 出力形式（ツールは使わない。この形式のみ出力。※必ず単括弧を使うこと）:
 [MEMORY]
 category: 永続的な事実|好み・傾向|重要な学び|進行中プロジェクト|方針・決定
-content: 一行で簡潔に
+content: 一行で簡潔に（日付は書かない。日付は自動で付与される）
 [/MEMORY]
 
 複数あるなら複数出力。無ければ [NO_MEMORY] とだけ出力。
@@ -281,7 +297,10 @@ def append_items(
     changed = False
     for idx, (category, text) in enumerate(items):
         section = MEMORY_SECTIONS[category]
-        clean = text.strip()
+        # #53: never store the entry's own date twice.
+        clean = strip_leading_date(text.strip(), date)
+        if not clean:
+            continue
         if clean in content:
             # Already known: reinforce (refresh last-seen / raise score) instead.
             reinforced = _reinforce_entry(content, clean, date)
