@@ -18,6 +18,72 @@ def _tool_candidates(name_lower: str, memory_root: Path, code_root: Path) -> lis
     ]
 
 
+# ── Single-bracket tool calls (issue #47) ────────────────
+# Local models sometimes write a tool call with one bracket ([READ_FILE path="x"])
+# instead of the documented [[READ_FILE path="x"]]. The parser only understood the
+# documented form, so nothing ran, the answer was empty, and the raw syntax leaked
+# into chat.md / journal. The name set is derived from the tool modules rather than
+# hardcoded, and a tag is only treated as a tool call when the name is known or the
+# tag carries an argument, so ordinary prose brackets survive.
+MODULE_TOOL_NAMES = frozenset(
+    p.stem.upper() for p in (Path(__file__).parent / "tools").glob("*.py") if p.stem != "__init__"
+)
+SINGLE_BRACKET_CALL_RE = re.compile(r"(?<!\[)\[([A-Z][A-Z0-9_]*)([^\[\]\n]*)\](?!\])")
+
+
+def _known_tool_names(memory_root: Path | None = None, code_root: Path | None = None) -> set[str]:
+    names = set(MODULE_TOOL_NAMES)
+    for root in (memory_root, code_root):
+        if root is None:
+            continue
+        tools_dir = Path(root) / "tools"
+        if tools_dir.is_dir():
+            names |= {p.stem.upper() for p in tools_dir.glob("*.py") if p.stem != "__init__"}
+    try:
+        from .mcp import get_tool_registry
+
+        names |= {name.upper() for name in get_tool_registry()}
+    except Exception:
+        pass
+    return names
+
+
+# A tag counts as a tool call when its name is a known tool, or when it carries an
+# argument (``path="x"`` / ``path=x``). Argless markers such as [NO_ACTION] /
+# [ARCHIVE_DONE] are deliberately not treated as tool calls.
+TOOL_ARG_RE = re.compile(r"\w+\s*=\s*\S")
+
+
+def _looks_like_tool_call(name: str, args: str, names: set[str] | None = None) -> bool:
+    if TOOL_ARG_RE.search(args):
+        return True
+    if names is not None:
+        return name in names
+    return name in MODULE_TOOL_NAMES
+
+
+def normalize_single_bracket_calls(
+    raw: str, memory_root: Path | None = None, code_root: Path | None = None
+) -> str:
+    """Rewrite single-bracket tool calls as ``[[TOOL ...]]`` (issue #47)."""
+    names = _known_tool_names(memory_root, code_root)
+
+    def _repl(m: re.Match) -> str:
+        name, args = m.group(1), m.group(2)
+        if _looks_like_tool_call(name, args, names):
+            return f"[[{name}{args}]]"
+        return m.group(0)
+
+    return SINGLE_BRACKET_CALL_RE.sub(_repl, raw)
+
+
+def strip_single_bracket_calls(raw: str) -> str:
+    """Remove single-bracket tool calls from text shown to the Owner (issue #47)."""
+    return SINGLE_BRACKET_CALL_RE.sub(
+        lambda m: "" if _looks_like_tool_call(m.group(1), m.group(2)) else m.group(0), raw
+    )
+
+
 def _load_tool(name_lower: str, tool_file: Path):
     """Dynamically load the tool module and return its run function."""
     module_name = f"_saku_tool_{name_lower}"
@@ -48,7 +114,9 @@ def _run_mcp_tool(name: str, args_str: str, body: str) -> str | None:
         return f"[{name}] [ERROR] MCP call failed: {e}"
 
 
-def _normalize_alternative_calls(raw: str) -> str:
+def _normalize_alternative_calls(
+    raw: str, memory_root: Path | None = None, code_root: Path | None = None
+) -> str:
     """Convert common hallucinated tool syntaxes to [[TOOL]] form (refs #28).
 
     Handles: <|tool_call>call:WEB_SEARCH{query: \"...\"}, call:WEB_SEARCH, etc.
@@ -89,7 +157,9 @@ def _normalize_alternative_calls(raw: str) -> str:
     )
     # Bare <|tool_call|> markers to visible
     raw = raw.replace("<|tool_call|>", "").replace("<tool_call>", "")
-    return raw
+    # Single-bracket calls are a common near-miss (#47); rescue them instead of
+    # letting the turn silently do nothing.
+    return normalize_single_bracket_calls(raw, memory_root, code_root)
 
 
 def list_tool_calls(raw: str) -> list[str]:
@@ -100,6 +170,7 @@ def list_tool_calls(raw: str) -> list[str]:
     the closing ``[[END]]`` marker is not a tool.
     """
     names: list[str] = []
+    raw = normalize_single_bracket_calls(raw)
     for m in re.finditer(r"\[\[([A-Z_]+)\s*(.*?)\]\]", raw):
         name = m.group(1)
         if name == "END" or name in names:
@@ -115,7 +186,7 @@ def exec_tools(raw: str, memory_root: Path, code_root: Path) -> list[str]:
     Tool search order: memory/tools/ → saku/tools/ → MCP tools (external servers)
     """
     # Normalize hallucinated formats before parsing (refs #28)
-    raw = _normalize_alternative_calls(raw)
+    raw = _normalize_alternative_calls(raw, memory_root, code_root)
     results: list[str] = []
 
     start_pattern = r"\[\[([A-Z_]+)\s*(.*?)\]\]"

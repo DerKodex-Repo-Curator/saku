@@ -92,6 +92,31 @@ def test_exec_tools_unknown_and_fake():
         assert not any("not closed" in r for r in res3), res3
 
 
+def test_single_bracket_tool_call_is_executed():
+    """#47: [READ_FILE ...] (single bracket) must run, not leak into the reply."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tools_dir = root / "tools"
+        tools_dir.mkdir()
+        (tools_dir / "echo.py").write_text(
+            "def run(base, path, body='', **kw):\n    return 'echo:' + body\n",
+            encoding="utf-8",
+        )
+        res = transport.exec_tools('[ECHO path="x"]\nhello\n', root, root)
+        assert any("echo:hello" in r for r in res), res
+        assert transport.list_tool_calls('[ECHO path="x"]') == ["ECHO"]
+
+
+def test_single_bracket_call_stripped_from_visible_text():
+    """#47: a single-bracket call must never reach chat.md / the journal."""
+    assert thinking.strip_tool_blocks('では読みます。\n[READ_FILE path="meta.md"]') == "では読みます。"
+    assert thinking.strip_tool_blocks('[WRITE_FILE path="principles/x.md"]\n本文') == "本文"
+    # ordinary prose brackets are not touched
+    assert thinking.strip_tool_blocks("[NOTE] これは本文です") == "[NOTE] これは本文です"
+    # documented double-bracket form still works
+    assert thinking.strip_tool_blocks('[[READ_FILE path="x.md"]]\n[[END]]\nこんにちは') == "こんにちは"
+
+
 def test_run_agent_loop_no_tools():
     calls = {"n": 0}
 
