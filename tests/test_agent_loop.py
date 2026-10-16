@@ -317,6 +317,52 @@ def test_compaction_is_announced_when_history_is_dropped():
     assert [m for m in logged if "compacted" in m], logged
 
 
+def test_unbacked_write_claims_are_reported():
+    """#52: a reply that says it wrote a file nothing backs must be flagged."""
+    logged: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = lambda h, c, on_token=None: (
+            "`principles/2026-10-16-none.md` に教訓を記録しました。"
+        )
+        try:
+            result = agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root, log=logged.append,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+    assert result.unbacked_claims == ["principles/2026-10-16-none.md"]
+    assert any("nothing backed" in m for m in logged), logged
+
+
+def test_backed_write_claims_are_not_reported():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "principles").mkdir()
+        llm = LlmConfig(name="mock", api_url="http://x", working_budget_tokens=100000)
+
+        def fake_chat_stream(history, llm_cfg, on_token=None):
+            # What a successful WRITE_FILE tool call leaves behind.
+            (root / "principles" / "2026-10-16-real.md").write_text("- 学び\n", encoding="utf-8")
+            return "`principles/2026-10-16-real.md` に記録しました。"
+
+        original = agent_loop.chat_stream
+        agent_loop.chat_stream = fake_chat_stream
+        try:
+            result = agent_loop.run_agent_loop(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+                llm, _make_ctx(), root, root,
+            )
+        finally:
+            agent_loop.chat_stream = original
+
+    assert result.unbacked_claims == []
+
+
 def test_run_agent_loop_no_action_marker():
     def fake_chat_stream(history, llm_cfg, on_token=None):
         return "[NO_ACTION]"

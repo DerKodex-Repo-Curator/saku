@@ -124,6 +124,7 @@ saku/                  # Core package (Python, uv-managed)
   context.py           # Context budget, tool-result pruning, compaction
   transport.py         # Tool dispatch ([[TOOL]] blocks + MCP tools)
   thinking.py          # <think> separation
+  verify.py            # Checks a report against what actually happened (#39/#52)
   ui.py                # Web UI (stdlib only, SSE streaming)
   dreaming.py          # Promotes journal/monologue -> MEMORY.md (long-term memory)
   wiki.py              # Self-organized knowledge base (notes, links, index)
