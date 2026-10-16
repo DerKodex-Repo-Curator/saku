@@ -123,6 +123,16 @@ auto_initiate_cooldown_seconds = 28800 # SAKU self-initiates every 8 hours
 # max_chars = 600          # 注入ブロックの最大文字数
 # sources = ["MEMORY.md", "principles/", "wiki/"]  # 想起元（メモリルート相対）
 
+# [guard] - 出力ガード（退化した出力を記録に残さない / #41）
+# ローカル LLM が反復ループに落ち、同じブロックを何度も出力することがあります。
+# そのまま journal に書くと「モデルの不具合」が記憶として残り、翌日の振り返りが
+# それを内容として読み返してしまいます。検出したら先頭1ブロック＋注記に圧縮します。
+# [guard]
+# enabled = true           # ガードを有効にする
+# max_repeat = 3           # 同じブロック/行がこの回数出たら退化とみなす
+# min_unit_chars = 40      # これ未満の短い単位（"ok" など）は無視して誤検知を防ぐ
+# max_chars = 4000         # 1件の記録の上限文字数（超えたら切り詰め）
+
 # [context] - コンテキスト管理（Phase B で実装。定義のみ）
 # 作業予算の何割で自動コンパクションするか（0.7 = 70%）
 # compaction_trigger = 0.7

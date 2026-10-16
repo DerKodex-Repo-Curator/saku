@@ -332,6 +332,9 @@ Ownerのメッセージ:
         save_chat_state(state)
         return
 
+    # Never post a repetition loop to the Owner: compress it first (issue #41).
+    saku_reply = agent.normalize_reply(saku_reply)
+
     # Check request list and append if any pending
     request_suffix = get_pending_requests()
     reply_block = f"\n**SAKU** ({now_str})\n{saku_reply}{request_suffix}\n"
