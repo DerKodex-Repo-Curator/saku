@@ -18,6 +18,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from saku import daemon as daemon_mod
+from _isolate_logging import isolate_daemon_logging
+
+# #42: daemon sets up file logging at import time, against the Owner's real
+# state/saku.log. Redirect it before any test exercises the logger.
+isolate_daemon_logging(daemon_mod.logger)
 
 _PASS = 0
 _FAIL = 0
