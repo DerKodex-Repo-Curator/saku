@@ -49,27 +49,71 @@ def _restore(fn_name, original):
 
 def test_reflection_fires_when_started_after_2am():
     """Daemon started at 03:30 on a fresh day must run the midnight reflection."""
-    ran = []
+    import tempfile
 
-    class _Refl:
-        @staticmethod
-        def run_reflection(d):
-            ran.append(d)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "journal").mkdir()
+        # #43: the daemon only reflects on a day that has a record.
+        (root / "journal" / "2026-08-04.md").write_text("## 20:00\n活動した\n", encoding="utf-8")
+        ran = []
 
-    orig_reflection = _patch("reflection", _Refl())
-    orig_initiate = _patch("saku_self_initiate", lambda reason: None)
-    orig_state = _patch("load_chat_state", lambda: _mock_state())
-    saved = {}
-    orig_save = _patch("save_chat_state", lambda s: saved.update(s))
-    try:
-        daemon_mod.check_and_run_midnight_reflection(datetime(2026, 8, 5, 3, 30))
-    finally:
-        _restore("reflection", orig_reflection)
-        _restore("saku_self_initiate", orig_initiate)
-        _restore("load_chat_state", orig_state)
-        _restore("save_chat_state", orig_save)
-    assert ran, "reflection did not run when started after 02:00"
+        class _Refl:
+            @staticmethod
+            def run_reflection(d):
+                ran.append(d)
+
+        orig_root = _patch("MEMORY_ROOT", root)
+        orig_reflection = _patch("reflection", _Refl())
+        orig_initiate = _patch("saku_self_initiate", lambda reason: None)
+        orig_state = _patch("load_chat_state", lambda: _mock_state())
+        saved = {}
+        orig_save = _patch("save_chat_state", lambda s: saved.update(s))
+        try:
+            daemon_mod.check_and_run_midnight_reflection(datetime(2026, 8, 5, 3, 30))
+        finally:
+            _restore("MEMORY_ROOT", orig_root)
+            _restore("reflection", orig_reflection)
+            _restore("saku_self_initiate", orig_initiate)
+            _restore("load_chat_state", orig_state)
+            _restore("save_chat_state", orig_save)
+    assert ran == ["2026-08-04"], "reflection did not run when started after 02:00"
     assert saved.get("last_reflection_date") == "2026-08-05"
+
+
+def test_reflection_does_not_report_a_review_of_an_empty_day():
+    """#43: no record for the target day means no review happened — say so."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        root.mkdir(exist_ok=True)
+        ran = []
+
+        class _Refl:
+            @staticmethod
+            def run_reflection(d):
+                ran.append(d)
+
+        calls = []
+        orig_root = _patch("MEMORY_ROOT", root)
+        orig_reflection = _patch("reflection", _Refl())
+        orig_initiate = _patch("saku_self_initiate", lambda reason: calls.append(reason))
+        orig_state = _patch("load_chat_state", lambda: _mock_state())
+        orig_save = _patch("save_chat_state", lambda s: None)
+        try:
+            daemon_mod.check_and_run_midnight_reflection(datetime(2026, 8, 5, 3, 30))
+        finally:
+            _restore("MEMORY_ROOT", orig_root)
+            _restore("reflection", orig_reflection)
+            _restore("saku_self_initiate", orig_initiate)
+            _restore("load_chat_state", orig_state)
+            _restore("save_chat_state", orig_save)
+
+    assert ran == [], "reflection ran with nothing to reflect on"
+    report = calls[0]
+    assert "記録が無かったため" in report, report
+    assert "振り返りを完了しました" not in report, report
 
 
 def test_reflection_waits_until_2am():
@@ -491,6 +535,9 @@ def _run_reflection_report(tmp: Path, touch_meta: bool) -> str:
                 os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
 
     (tmp / "meta.md").write_text("## 最近の出来事\n\n- 既存\n", encoding="utf-8")
+    # #43: the day must have a record, or the daemon correctly skips the reflection.
+    (tmp / "journal").mkdir(exist_ok=True)
+    (tmp / "journal" / "2026-08-04.md").write_text("## 20:00\n活動した\n", encoding="utf-8")
 
     orig_root = _patch("MEMORY_ROOT", tmp)
     orig_reflection = _patch("reflection", _Refl())
