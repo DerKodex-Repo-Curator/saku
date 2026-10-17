@@ -492,6 +492,18 @@ def notify_webui(message: str) -> None:
     )
 
 # ── Midnight Reflection (2:00 AM) ──────────────────────────
+def has_daily_logs(date: str) -> bool:
+    """Whether ``date`` has any journal or monologue content to reflect on (#43)."""
+    for sub in ("journal", "monologue"):
+        path = MEMORY_ROOT / sub / f"{date}.md"
+        try:
+            if path.exists() and path.read_text(encoding="utf-8").strip():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def check_and_run_midnight_reflection(now: datetime | None = None) -> None:
     """Run reflect.py once per day, any time on/after 02:00.
 
@@ -522,8 +534,13 @@ def check_and_run_midnight_reflection(now: datetime | None = None) -> None:
         meta_path = MEMORY_ROOT / "meta.md"
         meta_before = meta_path.stat().st_mtime_ns if meta_path.exists() else None
 
-        # Run reflect logic
-        reflection.run_reflection(yesterday)
+        # #43: a day with no journal/monologue is not a day to report a completed
+        # review for — and running the LLM over nothing is wasted work.
+        has_logs = has_daily_logs(yesterday)
+        if has_logs:
+            reflection.run_reflection(yesterday)
+        else:
+            print(f"[*] No journal/monologue for {yesterday}; skipping reflection.")
 
         meta_after = meta_path.stat().st_mtime_ns if meta_path.exists() else None
         meta_updated = meta_before != meta_after
@@ -535,6 +552,8 @@ def check_and_run_midnight_reflection(now: datetime | None = None) -> None:
         # Post a report message to chat.md autonomously (claim only what happened)
         if meta_updated:
             summary = f"昨日の活動の振り返りと、本日（{today_str}）の自己モデル（meta.md）の整理を完了しました。"
+        elif not has_logs:
+            summary = f"昨日（{yesterday}）の記録が無かったため、振り返りは行っていません。"
         else:
             summary = f"昨日の活動の振り返りを完了しました。（本日の自己モデル（meta.md）の更新はありませんでした）"
         saku_self_initiate(f"深夜振り返り報告 ({summary}今日もよろしくお願いいたします。)")
